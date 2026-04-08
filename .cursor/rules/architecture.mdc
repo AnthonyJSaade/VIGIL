@@ -1,0 +1,8 @@
+---
+alwaysApply: true
+---
+
+Use a deterministic orchestration core.
+LLMs may explain, patch, and critique, but scanner execution, verification, data persistence, and API behavior must be deterministic.
+Do not couple UI state directly to model output.
+Use explicit schemas for Finding, PatchProposal, CriticVerdict, VerificationReport, and TraceEvent.

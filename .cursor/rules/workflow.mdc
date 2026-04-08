@@ -1,0 +1,9 @@
+---
+alwaysApply: true
+---
+
+For any task that touches more than one file, start in plan mode.
+Before editing, list the files you will touch.
+After editing, run the smallest meaningful verification.
+Do not introduce new frameworks or infra unless required by the project docs.
+Respect the professor demo scope over ambitious extras.
