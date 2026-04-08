@@ -7,7 +7,7 @@
 2026-04-08
 
 ## Current Phase
-**Phase 2 complete** — Hunter module (Semgrep runner + findings normalizer) is built. Ready for Phase 3 (Run API + SSE Streaming).
+**Phase 3 complete** — Run API, SSE event bus, and streaming endpoint are built. Ready for Phase 4 (Findings Explorer).
 
 ## What Exists
 
@@ -33,9 +33,13 @@
 | `backend/app/db.py` | SQLite schema (6 tables) + async CRUD helpers + smoke test |
 | `backend/app/scanner/runner.py` | `run_semgrep(repo_path) -> dict` — async Semgrep CLI wrapper with timeout and error handling |
 | `backend/app/scanner/normalizer.py` | `normalize_findings(raw, run_id) -> list[Finding]` — maps Semgrep JSON to Finding schema. Handles severity mapping (CRITICAL/ERROR->error, WARNING/MEDIUM->warning, INFO/LOW->info). Includes inline smoke test. |
+| `backend/app/streaming/sse.py` | `EventBus` class — in-memory publish/subscribe per run_id. Publishes to all SSE subscribers + persists as TraceEvent. Singleton `bus` instance. |
+| `backend/app/routes/repos.py` | `GET /api/repos` — returns hardcoded curated demo repo list |
+| `backend/app/routes/runs.py` | `POST /api/runs` — creates run, launches Hunter as background task. `GET /api/runs/{id}` — returns run metadata. Background task: runs Semgrep, normalizes findings, publishes SSE events, updates run status. |
+| `backend/app/routes/stream.py` | `GET /api/runs/{id}/stream` — SSE endpoint via StreamingResponse |
 
 ## What Does NOT Exist Yet
-- No API routes (Phase 3-4)
+- No findings detail endpoints (Phase 4)
 - No LLM agents (Phase 5-6)
 - No verification pipeline (Phase 7)
 - No export bundle (Phase 8)
@@ -86,16 +90,20 @@
 - `runs`, `findings`, `patches`, `verdicts`, `verifications`, `trace_events`
 - All have async CRUD helpers in `backend/app/db.py`
 
-## API Endpoints (To Be Implemented)
+## API Endpoints
+
+Implemented:
 - `GET /api/repos` — list curated demo repos
-- `POST /api/runs` — start audit run
-- `GET /api/runs/{id}` — run metadata
-- `GET /api/runs/{id}/stream` — SSE event stream
-- `GET /api/runs/{id}/findings` — findings list
-- `GET /api/findings/{id}` — finding detail
-- `POST /api/findings/{id}/patch` — trigger Surgeon-Critic loop
-- `POST /api/patches/{id}/verify` — sandbox verification
-- `GET /api/runs/{id}/export` — HTML report or ZIP bundle
+- `POST /api/runs` — start audit run (launches bg scan)
+- `GET /api/runs/{id}` — run metadata + status
+- `GET /api/runs/{id}/stream` — SSE event stream (text/event-stream)
+
+To be implemented:
+- `GET /api/runs/{id}/findings` — findings list (Phase 4)
+- `GET /api/findings/{id}` — finding detail (Phase 4)
+- `POST /api/findings/{id}/patch` — trigger Surgeon-Critic loop (Phase 5-6)
+- `POST /api/patches/{id}/verify` — sandbox verification (Phase 7)
+- `GET /api/runs/{id}/export` — HTML report or ZIP bundle (Phase 8)
 
 ## Build Order
 1. Contracts and data models
@@ -123,3 +131,5 @@
 | 2026-04-08 | Created AGENTS.md, PLAN.md, .gitignore, cursor rules. Initialized git repo. Pushed to GitHub. Plan finalized with 5 upgrades: feedback loop, SSE streaming, vibe-coded demo repo, agent personas, HTML export. |
 | 2026-04-08 | Phase 1 complete: backend skeleton, 6 Pydantic models with enums, SQLite schema (6 tables), async CRUD helpers, FastAPI lifespan wiring. All verified. |
 | 2026-04-08 | Phase 2 complete: Hunter module — async Semgrep CLI runner (timeout, error handling, exit code awareness) + deterministic findings normalizer (severity mapping, snippet extraction). Verified with sample Semgrep JSON. |
+| 2026-04-08 | Pre-Phase 3 review: fixed severity ordering bug (CASE expression), added insert_findings_batch, expanded db.py smoke test (Run + Finding + TraceEvent). |
+| 2026-04-08 | Phase 3 complete: SSE EventBus (publish/subscribe per run_id, auto-persists TraceEvents), GET /api/repos, POST /api/runs (bg scan task), GET /api/runs/{id}, GET /api/runs/{id}/stream (SSE). All routes wired into main.py. Verified with live server. |

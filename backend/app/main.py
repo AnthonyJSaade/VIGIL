@@ -6,6 +6,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from .db import init_db
+from .routes import repos, runs, stream
 
 
 @asynccontextmanager
@@ -23,3 +24,7 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+app.include_router(repos.router)
+app.include_router(runs.router)
+app.include_router(stream.router)
