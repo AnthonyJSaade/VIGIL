@@ -2,7 +2,7 @@
 
 import json
 from contextlib import asynccontextmanager
-from datetime import datetime, timezone
+from datetime import datetime
 from typing import AsyncGenerator
 
 import aiosqlite
@@ -168,10 +168,35 @@ async def insert_finding(finding: Finding) -> None:
         await db.commit()
 
 
+async def insert_findings_batch(findings: list[Finding]) -> None:
+    """Insert multiple findings in a single transaction."""
+    if not findings:
+        return
+    async with get_db() as db:
+        await db.executemany(
+            "INSERT INTO findings (id, run_id, scanner, rule_id, severity, message, file_path, start_line, end_line, snippet, metadata, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            [
+                (
+                    f.id, f.run_id, f.scanner, f.rule_id, f.severity,
+                    f.message, f.file_path, f.start_line, f.end_line,
+                    f.snippet, json.dumps(f.metadata), _iso(f.created_at),
+                )
+                for f in findings
+            ],
+        )
+        await db.commit()
+
+
 async def get_findings_by_run(run_id: str) -> list[Finding]:
     async with get_db() as db:
         rows = await db.execute_fetchall(
-            "SELECT * FROM findings WHERE run_id = ? ORDER BY severity, file_path",
+            """SELECT * FROM findings WHERE run_id = ?
+               ORDER BY CASE severity
+                   WHEN 'error'   THEN 0
+                   WHEN 'warning' THEN 1
+                   WHEN 'info'    THEN 2
+                   ELSE 3
+               END, file_path""",
             (run_id,),
         )
         return [
@@ -361,6 +386,7 @@ if __name__ == "__main__":
     import asyncio
     import tempfile
     import os
+    from .models import SeverityLevel, AgentRole, TraceAction
 
     async def _smoke_test() -> None:
         tmp = tempfile.NamedTemporaryFile(suffix=".db", delete=False)
@@ -370,6 +396,7 @@ if __name__ == "__main__":
         try:
             await init_db()
 
+            # --- Run CRUD ---
             test_run = Run(id="run-001", repo_id="demo-1")
             await insert_run(test_run)
 
@@ -384,8 +411,46 @@ if __name__ == "__main__":
             assert fetched is not None
             assert fetched.status == "completed"
             assert fetched.finding_count == 3
+            print("  Run CRUD: OK")
 
-            print("DB smoke test passed")
+            # --- Finding batch insert + severity ordering ---
+            findings = [
+                Finding(id="f-info", run_id="run-001", rule_id="r1",
+                        severity=SeverityLevel.INFO, message="info msg",
+                        file_path="a.js", start_line=1, end_line=1, snippet="x"),
+                Finding(id="f-warn", run_id="run-001", rule_id="r2",
+                        severity=SeverityLevel.WARNING, message="warn msg",
+                        file_path="a.js", start_line=10, end_line=10, snippet="y"),
+                Finding(id="f-err", run_id="run-001", rule_id="r3",
+                        severity=SeverityLevel.ERROR, message="err msg",
+                        file_path="a.js", start_line=20, end_line=20, snippet="z"),
+            ]
+            await insert_findings_batch(findings)
+
+            fetched_findings = await get_findings_by_run("run-001")
+            assert len(fetched_findings) == 3
+            assert fetched_findings[0].severity == SeverityLevel.ERROR
+            assert fetched_findings[1].severity == SeverityLevel.WARNING
+            assert fetched_findings[2].severity == SeverityLevel.INFO
+
+            single = await get_finding("f-warn")
+            assert single is not None
+            assert single.message == "warn msg"
+            print("  Finding CRUD + ordering: OK")
+
+            # --- TraceEvent CRUD ---
+            evt = TraceEvent(id="t-001", run_id="run-001",
+                             role=AgentRole.HUNTER, action=TraceAction.SCAN_STARTED,
+                             payload={"repo": "demo-1"})
+            await insert_trace_event(evt)
+
+            events = await get_trace_events_by_run("run-001")
+            assert len(events) == 1
+            assert events[0].role == AgentRole.HUNTER
+            assert events[0].payload == {"repo": "demo-1"}
+            print("  TraceEvent CRUD: OK")
+
+            print("DB smoke test passed (all tables)")
         finally:
             os.unlink(tmp.name)
 
