@@ -1,0 +1,8 @@
+fastapi
+uvicorn[standard]
+anthropic
+aiosqlite
+pydantic
+pydantic-settings
+jinja2
+python-multipart
