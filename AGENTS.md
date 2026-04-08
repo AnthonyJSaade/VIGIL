@@ -17,7 +17,7 @@ The product must support this flow:
 
 ## Hard Scope Boundaries
 - MVP uses exactly three roles:
-  - Hunter = deterministic scanner/orchestrator
+  - Hunter = hybrid scanner (deterministic Semgrep + LLM code review) with orchestrator
   - Surgeon = minimal patch generator
   - Critic = independent reviewer
 - Only curated demo repos are in scope for the professor demo
@@ -36,7 +36,8 @@ The product must support this flow:
 
 ## Implementation Principles
 - Prefer deterministic code over agent reasoning whenever possible
-- Every scanner output must normalize into typed Findings JSON
+- The Hunter uses a hybrid pipeline: deterministic Semgrep first, then LLM review for logic flaws scanners miss. LLM findings are additive — they never block the pipeline.
+- Every scanner output must normalize into typed Findings JSON with a confidence score
 - Every patch proposal must target a single finding
 - Every patch must be reviewable as a diff
 - Critic must evaluate the patch independently

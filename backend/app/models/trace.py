@@ -17,6 +17,8 @@ class TraceAction(StrEnum):
     SCAN_STARTED = "scan_started"
     FINDING_DISCOVERED = "finding_discovered"
     SCAN_COMPLETED = "scan_completed"
+    LLM_REVIEW_STARTED = "llm_review_started"
+    LLM_REVIEW_COMPLETED = "llm_review_completed"
     PATCH_PROPOSED = "patch_proposed"
     REVIEW_STARTED = "review_started"
     REVIEW_REJECTED = "review_rejected"

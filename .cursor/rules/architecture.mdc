@@ -3,6 +3,8 @@ alwaysApply: true
 ---
 
 Use a deterministic orchestration core.
-LLMs may explain, patch, and critique, but scanner execution, verification, data persistence, and API behavior must be deterministic.
+The Hunter uses a hybrid pipeline: deterministic Semgrep scan first, then an additive LLM code review pass. LLM scan failures must never block the pipeline — Semgrep results always get through.
+LLMs may scan (Hunter phase 2), patch (Surgeon), and critique (Critic), but verification, data persistence, and API behavior must be deterministic.
 Do not couple UI state directly to model output.
 Use explicit schemas for Finding, PatchProposal, CriticVerdict, VerificationReport, and TraceEvent.
+Findings carry a confidence score: 1.0 for deterministic (Semgrep), 0.0–1.0 for LLM-assessed.

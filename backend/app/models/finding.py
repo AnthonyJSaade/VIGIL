@@ -23,5 +23,6 @@ class Finding(BaseModel):
     start_line: int
     end_line: int
     snippet: str
+    confidence: float = 1.0
     metadata: dict = Field(default_factory=dict)
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))

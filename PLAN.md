@@ -1,6 +1,6 @@
 # Vigil MVP Implementation Plan
 
-> **Stack**: Python (FastAPI) backend + Next.js frontend + Semgrep scanner + Claude (Anthropic) for LLM agents
+> **Stack**: Python (FastAPI) backend + Next.js frontend + Hybrid scanner (Semgrep + Claude code review) + Claude (Anthropic) for LLM agents
 > **Demo target**: Professor demo of a multi-agent DevSecOps gatekeeper for vibe-coded repos
 
 ## What Makes This Special
@@ -26,7 +26,12 @@ flowchart LR
   subgraph backend [FastAPI Backend]
     API[REST API]
     SSEEndpoint[SSE Stream]
-    Hunter[Hunter: Semgrep Runner]
+    subgraph hunter [Hunter: Hybrid Pipeline]
+      Orchestrator[Scan Orchestrator]
+      Semgrep[Semgrep Scanner]
+      LLMReview[Claude Code Review]
+      Dedup[Deduplicator]
+    end
     Surgeon[Surgeon: Claude Patch Gen]
     Critic[Critic: Claude Reviewer]
     Loop[Feedback Loop]
@@ -41,19 +46,23 @@ flowchart LR
   UI -->|HTTP| API
   SSEClient -->|EventSource| SSEEndpoint
   SSEEndpoint -->|push events| SSEClient
-  API --> Hunter
+  API --> Orchestrator
+  Orchestrator -->|"Phase 1: deterministic"| Semgrep
+  Orchestrator -->|"Phase 2: LLM review"| LLMReview
+  Orchestrator --> Dedup
   API --> Surgeon
   API --> Critic
   Surgeon <-->|retry with feedback| Loop
   Critic <-->|reject with concerns| Loop
   API --> Verifier
   API --> Export
-  Hunter --> Store
+  Orchestrator --> Store
   Surgeon --> Store
   Critic --> Store
   Verifier --> Store
   Verifier --> DemoRepo
-  Hunter -->|semgrep CLI| DemoRepo
+  Semgrep -->|semgrep CLI| DemoRepo
+  LLMReview -->|reads source files| DemoRepo
 ```
 
 
@@ -66,7 +75,9 @@ sequenceDiagram
   participant UI as Next.js UI
   participant SSE as SSE Stream
   participant API as FastAPI
-  participant Hunter as Hunter/Semgrep
+  participant Hunter as Hunter/Orchestrator
+  participant Semgrep as Semgrep CLI
+  participant LLM as Claude Code Review
   participant Surgeon as Surgeon/Claude
   participant Critic as Critic/Claude
   participant Sandbox as Docker Sandbox
@@ -74,11 +85,19 @@ sequenceDiagram
   User->>UI: Select demo repo
   UI->>API: POST /api/runs
   UI->>SSE: Subscribe to /api/runs/{id}/stream
-  API->>Hunter: Run Semgrep on repo
-  SSE-->>UI: event: hunter_started
-  SSE-->>UI: event: finding_discovered (per finding)
-  SSE-->>UI: event: hunter_completed
-  API-->>UI: Findings list
+  API->>Hunter: Run full scan
+  SSE-->>UI: event: scan_started
+  Hunter->>Semgrep: Phase 1: deterministic scan
+  Semgrep-->>Hunter: Semgrep findings
+  SSE-->>UI: event: finding_discovered (per Semgrep finding)
+  SSE-->>UI: event: llm_review_started
+  Hunter->>LLM: Phase 2: code review (with Semgrep findings to skip)
+  LLM-->>Hunter: LLM findings (logic flaws, auth gaps)
+  SSE-->>UI: event: finding_discovered (per LLM finding)
+  SSE-->>UI: event: llm_review_completed
+  Note over Hunter: Deduplicate overlapping findings
+  SSE-->>UI: event: scan_completed
+  API-->>UI: Findings list (Semgrep + LLM, with confidence scores)
 
   User->>UI: Select a finding
   UI->>API: POST /api/findings/{id}/patch
@@ -131,9 +150,11 @@ vigil-ai/
 │   │   │   ├── critic.py            # CriticVerdict
 │   │   │   ├── verification.py      # VerificationReport
 │   │   │   └── trace.py             # TraceEvent
-│   │   ├── scanner/                 # Hunter module
+│   │   ├── scanner/                 # Hunter module (hybrid pipeline)
 │   │   │   ├── runner.py            # Invoke semgrep CLI, collect JSON
-│   │   │   └── normalizer.py        # Semgrep JSON -> Finding[]
+│   │   │   ├── normalizer.py        # Semgrep JSON -> Finding[]
+│   │   │   ├── llm_reviewer.py      # Claude code review -> Finding[]
+│   │   │   └── orchestrator.py      # Two-phase pipeline + deduplication
 │   │   ├── agents/                  # LLM-backed agents
 │   │   │   ├── surgeon.py           # Claude: finding -> diff (supports retry)
 │   │   │   ├── critic.py            # Claude: diff -> verdict
@@ -206,7 +227,7 @@ Define all typed schemas so every downstream module agrees on shape.
 
 | File                                 | What it defines                                                                                                      |
 | ------------------------------------ | -------------------------------------------------------------------------------------------------------------------- |
-| `backend/app/models/finding.py`      | `Finding`: id, run_id, scanner, rule_id, severity, message, file_path, start/end line, snippet, metadata, created_at |
+| `backend/app/models/finding.py`      | `Finding`: id, run_id, scanner, rule_id, severity, message, file_path, start/end line, snippet, confidence (float), metadata, created_at |
 | `backend/app/models/patch.py`        | `PatchProposal`: id, finding_id, diff, explanation, model_used, attempt (1 or 2), prior_concerns, created_at         |
 | `backend/app/models/critic.py`       | `CriticVerdict`: id, patch_id, approved, reasoning, concerns[], model_used, created_at                               |
 | `backend/app/models/verification.py` | `VerificationReport`: id, patch_id, scanner_rerun_clean, tests_passed, details, created_at                           |
@@ -214,13 +235,15 @@ Define all typed schemas so every downstream module agrees on shape.
 | `backend/app/db.py`                  | SQLite via aiosqlite. Tables: runs, findings, patches, verdicts, verifications, trace_events. Async CRUD helpers.    |
 
 
-### Phase 2: Scanner Runner + Findings Normalization (Hunter)
+### Phase 2: Scanner Runner + Findings Normalization (Hunter — Hybrid Pipeline)
 
 
-| File                                | What it does                                                                                             |
-| ----------------------------------- | -------------------------------------------------------------------------------------------------------- |
-| `backend/app/scanner/runner.py`     | `run_semgrep(repo_path) -> dict` — shells out to semgrep CLI, returns raw JSON. Emits trace events.      |
-| `backend/app/scanner/normalizer.py` | `normalize_findings(raw, run_id) -> list[Finding]` — maps Semgrep JSON to Finding schema. Deterministic. |
+| File                                     | What it does                                                                                                                                                   |
+| ---------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `backend/app/scanner/runner.py`          | `run_semgrep(repo_path) -> dict` — shells out to semgrep CLI, returns raw JSON. Emits trace events.                                                            |
+| `backend/app/scanner/normalizer.py`      | `normalize_findings(raw, run_id) -> list[Finding]` — maps Semgrep JSON to Finding schema. Deterministic.                                                       |
+| `backend/app/scanner/llm_reviewer.py`    | `review_code(repo_path, run_id, existing) -> list[Finding]` — Claude code review that skips Semgrep duplicates. Findings tagged `scanner="claude-review"`.      |
+| `backend/app/scanner/orchestrator.py`    | `run_full_scan(run_id, repo_path) -> list[Finding]` — Phase 1: Semgrep, Phase 2: LLM review, then deduplicate. Publishes SSE events throughout.                |
 
 
 ### Phase 3: Run API + SSE Streaming
@@ -311,15 +334,17 @@ Define all typed schemas so every downstream module agrees on shape.
 ## Key Technical Decisions
 
 
-| Decision                        | Rationale                                        |
-| ------------------------------- | ------------------------------------------------ |
-| SQLite                          | Zero infra, built-in Python, sufficient for demo |
-| Anthropic SDK                   | Claude for Surgeon + Critic agents               |
-| Semgrep CLI via subprocess      | Deterministic scanning, no LLM in scan path      |
-| Separate system prompts         | Surgeon and Critic are independent               |
-| asyncio.Queue for SSE           | Simple event bus, no Redis needed                |
-| Jinja2 for HTML report          | Already a FastAPI dependency                     |
-| Max 2 attempts in feedback loop | Bounded, predictable demo timing                 |
+| Decision                        | Rationale                                                                    |
+| ------------------------------- | ---------------------------------------------------------------------------- |
+| SQLite                          | Zero infra, built-in Python, sufficient for demo                             |
+| Anthropic SDK                   | Claude for Hunter LLM review + Surgeon + Critic agents                       |
+| Hybrid Hunter pipeline          | Semgrep (deterministic, fast) then Claude code review (catches logic flaws)  |
+| Confidence scores on findings   | Semgrep=1.0 (certain), LLM=0.0–1.0 (self-assessed) — UI distinguishes them  |
+| LLM findings are additive       | LLM failures never block the pipeline — Semgrep results always get through   |
+| Separate system prompts         | Surgeon and Critic are independent                                           |
+| asyncio.Queue for SSE           | Simple event bus, no Redis needed                                            |
+| Jinja2 for HTML report          | Already a FastAPI dependency                                                 |
+| Max 2 attempts in feedback loop | Bounded, predictable demo timing                                             |
 
 
 ## Dependencies

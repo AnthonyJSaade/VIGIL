@@ -7,7 +7,7 @@
 2026-04-08
 
 ## Current Phase
-**Phase 3 complete** — Run API, SSE event bus, and streaming endpoint are built. Ready for Phase 4 (Findings Explorer).
+**Phase 3 complete + Hunter expansion** — Run API, SSE event bus, streaming endpoint, and hybrid scan pipeline (Semgrep + LLM review) are built. Ready for Phase 4 (Findings Explorer).
 
 ## What Exists
 
@@ -23,24 +23,27 @@
 | `backend/requirements.txt` | Python dependencies: fastapi, uvicorn, anthropic, aiosqlite, pydantic, pydantic-settings, jinja2, python-multipart |
 | `backend/app/main.py` | FastAPI app with CORS middleware and lifespan (calls init_db on startup) |
 | `backend/app/config.py` | Settings via pydantic-settings (VIGIL_ env prefix): anthropic_api_key, db_path, demo_repos_path |
-| `backend/app/models/finding.py` | `Finding` + `SeverityLevel` enum |
+| `backend/app/models/finding.py` | `Finding` (with `confidence` field) + `SeverityLevel` enum |
 | `backend/app/models/patch.py` | `PatchProposal` (supports attempt number + prior_concerns for retry) |
 | `backend/app/models/critic.py` | `CriticVerdict` |
 | `backend/app/models/verification.py` | `VerificationReport` |
-| `backend/app/models/trace.py` | `TraceEvent` + `AgentRole` + `TraceAction` enums |
+| `backend/app/models/trace.py` | `TraceEvent` + `AgentRole` + `TraceAction` enums (includes LLM_REVIEW_STARTED/COMPLETED) |
 | `backend/app/models/run.py` | `Run` + `RunStatus` enum |
 | `backend/app/models/__init__.py` | Re-exports all models and enums |
 | `backend/app/db.py` | SQLite schema (6 tables) + async CRUD helpers + smoke test |
 | `backend/app/scanner/runner.py` | `run_semgrep(repo_path) -> dict` — async Semgrep CLI wrapper with timeout and error handling |
 | `backend/app/scanner/normalizer.py` | `normalize_findings(raw, run_id) -> list[Finding]` — maps Semgrep JSON to Finding schema. Handles severity mapping (CRITICAL/ERROR->error, WARNING/MEDIUM->warning, INFO/LOW->info). Includes inline smoke test. |
+| `backend/app/scanner/llm_reviewer.py` | `review_code(repo_path, run_id, existing_findings) -> list[Finding]` — Claude-powered code review. Collects source files, builds prompt with existing findings to skip, parses structured JSON response. Findings tagged `scanner="claude-review"` with self-assessed confidence. Graceful failure (returns empty list). |
+| `backend/app/scanner/orchestrator.py` | `run_full_scan(run_id, repo_path) -> list[Finding]` — two-phase Hunter pipeline. Phase 1: Semgrep. Phase 2: LLM review. Deduplicates overlapping findings (3-line tolerance). Publishes SSE events throughout. Persists all findings. |
 | `backend/app/streaming/sse.py` | `EventBus` class — in-memory publish/subscribe per run_id. Publishes to all SSE subscribers + persists as TraceEvent. Singleton `bus` instance. |
 | `backend/app/routes/repos.py` | `GET /api/repos` — returns hardcoded curated demo repo list |
-| `backend/app/routes/runs.py` | `POST /api/runs` — creates run, launches Hunter as background task. `GET /api/runs/{id}` — returns run metadata. Background task: runs Semgrep, normalizes findings, publishes SSE events, updates run status. |
+| `backend/app/routes/runs.py` | `POST /api/runs` — creates run, launches Hunter as background task. `GET /api/runs/{id}` — returns run metadata. Background task: calls `run_full_scan()` orchestrator (Semgrep + LLM review). |
 | `backend/app/routes/stream.py` | `GET /api/runs/{id}/stream` — SSE endpoint via StreamingResponse |
 
 ## What Does NOT Exist Yet
 - No findings detail endpoints (Phase 4)
-- No LLM agents (Phase 5-6)
+- No Surgeon LLM agent (Phase 5)
+- No Critic LLM agent (Phase 6)
 - No verification pipeline (Phase 7)
 - No export bundle (Phase 8)
 - No frontend code (Phase 9)
@@ -53,7 +56,7 @@
 |---|---|
 | Backend | Python + FastAPI |
 | Frontend | Next.js (App Router) + Tailwind CSS |
-| Scanner | Semgrep CLI (deterministic, no LLM) |
+| Scanner | Semgrep CLI (deterministic) + Claude LLM review (hybrid pipeline) |
 | LLM | Anthropic Claude (via `anthropic` Python SDK) |
 | Database | SQLite via aiosqlite |
 | Streaming | Server-Sent Events (SSE) via asyncio.Queue |
@@ -64,7 +67,7 @@
 
 | Role | Type | What It Does |
 |---|---|---|
-| **Hunter** | Deterministic | Runs Semgrep, normalizes findings into typed schema |
+| **Hunter** | Hybrid (deterministic + LLM) | Phase 1: Semgrep scan. Phase 2: Claude code review. Deduplicates overlapping findings. |
 | **Surgeon** | LLM (Claude) | Generates minimal patch for a single finding, supports retry with Critic feedback |
 | **Critic** | LLM (Claude) | Independently reviews patch, approves or rejects with concerns list |
 
@@ -79,11 +82,11 @@
 - Trace events stored for full Hunter -> Surgeon -> Critic -> Verifier history
 
 ## Data Models (Implemented)
-- `Finding` — id, run_id, scanner, rule_id, severity (error/warning/info), message, file_path, start_line, end_line, snippet, metadata, created_at
+- `Finding` — id, run_id, scanner, rule_id, severity (error/warning/info), message, file_path, start_line, end_line, snippet, confidence (float, default 1.0), metadata, created_at
 - `PatchProposal` — id, finding_id, diff, explanation, model_used, attempt (1 or 2), prior_concerns (list or None), created_at
 - `CriticVerdict` — id, patch_id, approved (bool), reasoning, concerns (list), model_used, created_at
 - `VerificationReport` — id, patch_id, scanner_rerun_clean (bool), tests_passed (bool or None), details, created_at
-- `TraceEvent` — id, run_id, role (hunter/surgeon/critic/verifier), action (enum of 10 values), payload (dict), timestamp
+- `TraceEvent` — id, run_id, role (hunter/surgeon/critic/verifier), action (enum of 12 values incl. llm_review_started/completed), payload (dict), timestamp
 - `Run` — id, repo_id, status (pending/scanning/completed/failed), finding_count, created_at
 
 ## SQLite Tables (Implemented)
@@ -133,3 +136,4 @@ To be implemented:
 | 2026-04-08 | Phase 2 complete: Hunter module — async Semgrep CLI runner (timeout, error handling, exit code awareness) + deterministic findings normalizer (severity mapping, snippet extraction). Verified with sample Semgrep JSON. |
 | 2026-04-08 | Pre-Phase 3 review: fixed severity ordering bug (CASE expression), added insert_findings_batch, expanded db.py smoke test (Run + Finding + TraceEvent). |
 | 2026-04-08 | Phase 3 complete: SSE EventBus (publish/subscribe per run_id, auto-persists TraceEvents), GET /api/repos, POST /api/runs (bg scan task), GET /api/runs/{id}, GET /api/runs/{id}/stream (SSE). All routes wired into main.py. Verified with live server. |
+| 2026-04-08 | Hunter expansion: Added hybrid scan pipeline. Finding model gets `confidence` field (float, Semgrep=1.0, LLM=0.6-0.9). TraceAction gets LLM_REVIEW_STARTED/COMPLETED. New `scanner/llm_reviewer.py` (Claude code review, skips Semgrep duplicates, structured JSON output). New `scanner/orchestrator.py` (two-phase pipeline, deduplication with 3-line tolerance, SSE publishing). `routes/runs.py` now delegates to orchestrator instead of calling Semgrep directly. DB schema updated with `confidence REAL` column. All verified. |

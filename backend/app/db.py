@@ -37,6 +37,7 @@ CREATE TABLE IF NOT EXISTS findings (
     start_line INTEGER NOT NULL,
     end_line INTEGER NOT NULL,
     snippet TEXT NOT NULL,
+    confidence REAL NOT NULL DEFAULT 1.0,
     metadata TEXT NOT NULL DEFAULT '{}',
     created_at TEXT NOT NULL
 );
@@ -157,12 +158,13 @@ async def update_run_status(run_id: str, status: str, finding_count: int | None 
 async def insert_finding(finding: Finding) -> None:
     async with get_db() as db:
         await db.execute(
-            "INSERT INTO findings (id, run_id, scanner, rule_id, severity, message, file_path, start_line, end_line, snippet, metadata, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "INSERT INTO findings (id, run_id, scanner, rule_id, severity, message, file_path, start_line, end_line, snippet, confidence, metadata, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 finding.id, finding.run_id, finding.scanner, finding.rule_id,
                 finding.severity, finding.message, finding.file_path,
                 finding.start_line, finding.end_line, finding.snippet,
-                json.dumps(finding.metadata), _iso(finding.created_at),
+                finding.confidence, json.dumps(finding.metadata),
+                _iso(finding.created_at),
             ),
         )
         await db.commit()
@@ -174,12 +176,13 @@ async def insert_findings_batch(findings: list[Finding]) -> None:
         return
     async with get_db() as db:
         await db.executemany(
-            "INSERT INTO findings (id, run_id, scanner, rule_id, severity, message, file_path, start_line, end_line, snippet, metadata, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "INSERT INTO findings (id, run_id, scanner, rule_id, severity, message, file_path, start_line, end_line, snippet, confidence, metadata, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             [
                 (
                     f.id, f.run_id, f.scanner, f.rule_id, f.severity,
                     f.message, f.file_path, f.start_line, f.end_line,
-                    f.snippet, json.dumps(f.metadata), _iso(f.created_at),
+                    f.snippet, f.confidence, json.dumps(f.metadata),
+                    _iso(f.created_at),
                 )
                 for f in findings
             ],
@@ -205,6 +208,7 @@ async def get_findings_by_run(run_id: str) -> list[Finding]:
                 rule_id=r["rule_id"], severity=r["severity"], message=r["message"],
                 file_path=r["file_path"], start_line=r["start_line"],
                 end_line=r["end_line"], snippet=r["snippet"],
+                confidence=r["confidence"],
                 metadata=json.loads(r["metadata"]), created_at=_parse_dt(r["created_at"]),
             )
             for r in rows
@@ -224,6 +228,7 @@ async def get_finding(finding_id: str) -> Finding | None:
             rule_id=r["rule_id"], severity=r["severity"], message=r["message"],
             file_path=r["file_path"], start_line=r["start_line"],
             end_line=r["end_line"], snippet=r["snippet"],
+            confidence=r["confidence"],
             metadata=json.loads(r["metadata"]), created_at=_parse_dt(r["created_at"]),
         )
 

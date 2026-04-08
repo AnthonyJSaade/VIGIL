@@ -8,15 +8,10 @@ from fastapi import APIRouter, BackgroundTasks, HTTPException
 from pydantic import BaseModel
 
 from ..config import settings
-from ..db import (
-    get_run,
-    insert_findings_batch,
-    insert_run,
-    update_run_status,
-)
+from ..db import get_run, insert_run, update_run_status
 from ..models import Run, RunStatus, AgentRole, TraceAction
-from ..scanner.normalizer import normalize_findings
-from ..scanner.runner import ScanError, run_semgrep
+from ..scanner.orchestrator import run_full_scan
+from ..scanner.runner import ScanError
 from ..streaming.sse import bus
 from .repos import CURATED_REPOS
 
@@ -38,27 +33,14 @@ class RunSummary(BaseModel):
 
 
 async def _execute_scan(run_id: str, repo_path: Path) -> None:
-    """Background task: run Semgrep, normalize findings, persist, publish SSE."""
+    """Background task: run the full Hunter pipeline (Semgrep + LLM review)."""
     try:
         await update_run_status(run_id, RunStatus.SCANNING)
-        await bus.publish(run_id, AgentRole.HUNTER, TraceAction.SCAN_STARTED,
-                          {"repo_path": str(repo_path)})
 
-        raw = await run_semgrep(repo_path)
-        findings = normalize_findings(raw, run_id)
+        findings = await run_full_scan(run_id, repo_path)
 
-        for finding in findings:
-            await bus.publish(
-                run_id, AgentRole.HUNTER, TraceAction.FINDING_DISCOVERED,
-                {"finding_id": finding.id, "rule_id": finding.rule_id,
-                 "severity": finding.severity, "file_path": finding.file_path},
-            )
-
-        await insert_findings_batch(findings)
         await update_run_status(run_id, RunStatus.COMPLETED,
                                 finding_count=len(findings))
-        await bus.publish(run_id, AgentRole.HUNTER, TraceAction.SCAN_COMPLETED,
-                          {"finding_count": len(findings)})
 
     except ScanError as exc:
         log.error("scan failed for run %s: %s", run_id, exc)
