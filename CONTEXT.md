@@ -7,7 +7,7 @@
 2026-04-08
 
 ## Current Phase
-**Phase 1 complete** — Data models, SQLite schema, and CRUD helpers are built. Ready for Phase 2 (Scanner Runner).
+**Phase 2 complete** — Hunter module (Semgrep runner + findings normalizer) is built. Ready for Phase 3 (Run API + SSE Streaming).
 
 ## What Exists
 
@@ -31,10 +31,11 @@
 | `backend/app/models/run.py` | `Run` + `RunStatus` enum |
 | `backend/app/models/__init__.py` | Re-exports all models and enums |
 | `backend/app/db.py` | SQLite schema (6 tables) + async CRUD helpers + smoke test |
+| `backend/app/scanner/runner.py` | `run_semgrep(repo_path) -> dict` — async Semgrep CLI wrapper with timeout and error handling |
+| `backend/app/scanner/normalizer.py` | `normalize_findings(raw, run_id) -> list[Finding]` — maps Semgrep JSON to Finding schema. Handles severity mapping (CRITICAL/ERROR->error, WARNING/MEDIUM->warning, INFO/LOW->info). Includes inline smoke test. |
 
 ## What Does NOT Exist Yet
 - No API routes (Phase 3-4)
-- No scanner runner (Phase 2)
 - No LLM agents (Phase 5-6)
 - No verification pipeline (Phase 7)
 - No export bundle (Phase 8)
@@ -121,3 +122,4 @@
 |---|---|
 | 2026-04-08 | Created AGENTS.md, PLAN.md, .gitignore, cursor rules. Initialized git repo. Pushed to GitHub. Plan finalized with 5 upgrades: feedback loop, SSE streaming, vibe-coded demo repo, agent personas, HTML export. |
 | 2026-04-08 | Phase 1 complete: backend skeleton, 6 Pydantic models with enums, SQLite schema (6 tables), async CRUD helpers, FastAPI lifespan wiring. All verified. |
+| 2026-04-08 | Phase 2 complete: Hunter module — async Semgrep CLI runner (timeout, error handling, exit code awareness) + deterministic findings normalizer (severity mapping, snippet extraction). Verified with sample Semgrep JSON. |
