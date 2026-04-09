@@ -7,7 +7,7 @@
 2026-04-08
 
 ## Current Phase
-**Phase 4 complete** — Findings explorer endpoints built. Ready for Phase 5 (Surgeon patch pipeline).
+**Phases 5+6 complete** — Surgeon, Critic, and feedback loop orchestrator built. Ready for Phase 7 (Verification pipeline).
 
 ## What Exists
 
@@ -38,12 +38,13 @@
 | `backend/app/streaming/sse.py` | `EventBus` class — in-memory publish/subscribe per run_id. Publishes to all SSE subscribers + persists as TraceEvent. Singleton `bus` instance. |
 | `backend/app/routes/repos.py` | `GET /api/repos` — returns hardcoded curated demo repo list |
 | `backend/app/routes/runs.py` | `POST /api/runs` — creates run, launches Hunter as background task. `GET /api/runs/{id}` — returns run metadata. Background task: calls `run_full_scan()` orchestrator (Semgrep + LLM review). |
-| `backend/app/routes/findings.py` | `GET /api/runs/{run_id}/findings` — findings list (filterable by severity, scanner). `GET /api/findings/{id}` — single finding detail with snippet + metadata. |
+| `backend/app/agents/surgeon.py` | `propose_patch(finding, file_content, prior_concerns?, attempt?) -> PatchProposal`. Calls Claude. Produces unified diff + explanation. Supports retry with Critic feedback. |
+| `backend/app/agents/critic.py` | `review_patch(finding, patch, file_content) -> CriticVerdict`. Independent Claude call — no access to Surgeon's reasoning. Returns approved/rejected with concerns list. |
+| `backend/app/agents/orchestrator.py` | `run_patch_review_loop(finding_id, repo_path) -> (PatchProposal, CriticVerdict)`. Surgeon-Critic feedback loop, max 2 attempts. Publishes SSE events at each step. |
+| `backend/app/routes/findings.py` | `GET /api/runs/{run_id}/findings` (filterable), `GET /api/findings/{id}` (detail), `POST /api/findings/{id}/patch` (trigger Surgeon-Critic loop), `GET /api/findings/{id}/patches` (list patch attempts with verdicts). |
 | `backend/app/routes/stream.py` | `GET /api/runs/{id}/stream` — SSE endpoint via StreamingResponse |
 
 ## What Does NOT Exist Yet
-- No Surgeon LLM agent (Phase 5)
-- No Critic LLM agent (Phase 6)
 - No verification pipeline (Phase 7)
 - No export bundle (Phase 8)
 - No frontend code (Phase 9)
@@ -102,9 +103,10 @@ Implemented:
 - `GET /api/runs/{id}/stream` — SSE event stream (text/event-stream)
 - `GET /api/runs/{run_id}/findings` — findings list (filterable by severity, scanner)
 - `GET /api/findings/{id}` — single finding detail with snippet + metadata
+- `POST /api/findings/{id}/patch` — trigger Surgeon-Critic feedback loop (bg task, 202)
+- `GET /api/findings/{id}/patches` — list all patch attempts with verdicts
 
 To be implemented:
-- `POST /api/findings/{id}/patch` — trigger Surgeon-Critic loop (Phase 5-6)
 - `POST /api/patches/{id}/verify` — sandbox verification (Phase 7)
 - `GET /api/runs/{id}/export` — HTML report or ZIP bundle (Phase 8)
 
@@ -138,3 +140,4 @@ To be implemented:
 | 2026-04-08 | Phase 3 complete: SSE EventBus (publish/subscribe per run_id, auto-persists TraceEvents), GET /api/repos, POST /api/runs (bg scan task), GET /api/runs/{id}, GET /api/runs/{id}/stream (SSE). All routes wired into main.py. Verified with live server. |
 | 2026-04-08 | Hunter expansion: Added hybrid scan pipeline. Finding model gets `confidence` field (float, Semgrep=1.0, LLM=0.6-0.9). TraceAction gets LLM_REVIEW_STARTED/COMPLETED. New `scanner/llm_reviewer.py` (Claude code review, skips Semgrep duplicates, structured JSON output). New `scanner/orchestrator.py` (two-phase pipeline, deduplication with 3-line tolerance, SSE publishing). `routes/runs.py` now delegates to orchestrator instead of calling Semgrep directly. DB schema updated with `confidence REAL` column. All verified. |
 | 2026-04-08 | Phase 4 complete: Findings explorer — `GET /api/runs/{run_id}/findings` (filterable by severity and scanner) + `GET /api/findings/{id}` (full detail with snippet + metadata). Wired into main.py. |
+| 2026-04-08 | Phases 5+6 complete: Surgeon agent (`agents/surgeon.py`) generates minimal unified diffs via Claude. Critic agent (`agents/critic.py`) independently reviews patches — no access to Surgeon reasoning. Feedback loop orchestrator (`agents/orchestrator.py`) runs max 2 attempts with Critic concerns fed back to Surgeon. `POST /api/findings/{id}/patch` triggers the loop as a bg task (202). `GET /api/findings/{id}/patches` returns all attempts with verdicts. All SSE events published. |

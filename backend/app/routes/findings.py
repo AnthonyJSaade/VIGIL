@@ -1,10 +1,17 @@
-"""Findings explorer — list and inspect vulnerability findings for a run."""
+"""Findings explorer — list, inspect, and trigger patch pipeline for findings."""
 
-from fastapi import APIRouter, HTTPException, Query
+import logging
+
+from fastapi import APIRouter, BackgroundTasks, HTTPException, Query
 from pydantic import BaseModel
 
-from ..db import get_finding, get_findings_by_run, get_run
+from ..agents.orchestrator import run_patch_review_loop
+from ..config import settings
+from ..db import get_finding, get_findings_by_run, get_run, get_patches_by_finding
 from ..models.finding import SeverityLevel
+from .repos import CURATED_REPOS
+
+log = logging.getLogger(__name__)
 
 router = APIRouter(tags=["findings"])
 
@@ -73,3 +80,95 @@ async def get_finding_detail(finding_id: str) -> FindingDetail:
     if finding is None:
         raise HTTPException(status_code=404, detail="Finding not found")
     return _to_detail(finding)
+
+
+# ---------------------------------------------------------------------------
+# Patch pipeline (Surgeon-Critic feedback loop)
+# ---------------------------------------------------------------------------
+
+class PatchResult(BaseModel):
+    patch_id: str
+    finding_id: str
+    diff: str
+    explanation: str
+    attempt: int
+    approved: bool
+    reasoning: str
+    concerns: list[str]
+
+
+class PatchTriggerResponse(BaseModel):
+    status: str
+    finding_id: str
+    message: str
+
+
+async def _run_patch_pipeline(finding_id: str, repo_path: str) -> None:
+    """Background task: run the Surgeon-Critic loop for a finding."""
+    from pathlib import Path
+    try:
+        await run_patch_review_loop(finding_id, Path(repo_path))
+    except Exception as exc:
+        log.exception("Patch pipeline failed for finding %s: %s", finding_id, exc)
+
+
+@router.post("/api/findings/{finding_id}/patch", response_model=PatchTriggerResponse, status_code=202)
+async def trigger_patch(
+    finding_id: str,
+    background_tasks: BackgroundTasks,
+) -> PatchTriggerResponse:
+    finding = await get_finding(finding_id)
+    if finding is None:
+        raise HTTPException(status_code=404, detail="Finding not found")
+
+    existing_patches = await get_patches_by_finding(finding_id)
+    if existing_patches:
+        raise HTTPException(
+            status_code=409,
+            detail="Patch pipeline already ran for this finding",
+        )
+
+    run = await get_run(finding.run_id)
+    if run is None:
+        raise HTTPException(status_code=404, detail="Run not found")
+
+    repo = next((r for r in CURATED_REPOS if r.id == run.repo_id), None)
+    if repo is None:
+        raise HTTPException(status_code=404, detail="Unknown repo for this run")
+
+    repo_path = settings.demo_repos_path / repo.id
+    if not repo_path.exists():
+        raise HTTPException(status_code=404, detail="Demo repo directory not found")
+
+    background_tasks.add_task(_run_patch_pipeline, finding_id, str(repo_path))
+
+    return PatchTriggerResponse(
+        status="started",
+        finding_id=finding_id,
+        message="Surgeon-Critic pipeline started. Watch the SSE stream for updates.",
+    )
+
+
+@router.get("/api/findings/{finding_id}/patches", response_model=list[PatchResult])
+async def list_patches(finding_id: str) -> list[PatchResult]:
+    finding = await get_finding(finding_id)
+    if finding is None:
+        raise HTTPException(status_code=404, detail="Finding not found")
+
+    from ..db import get_verdict_by_patch
+
+    patches = await get_patches_by_finding(finding_id)
+    results = []
+    for p in patches:
+        verdict = await get_verdict_by_patch(p.id)
+        results.append(PatchResult(
+            patch_id=p.id,
+            finding_id=p.finding_id,
+            diff=p.diff,
+            explanation=p.explanation,
+            attempt=p.attempt,
+            approved=verdict.approved if verdict else False,
+            reasoning=verdict.reasoning if verdict else "Pending review",
+            concerns=verdict.concerns if verdict else [],
+        ))
+    return results
