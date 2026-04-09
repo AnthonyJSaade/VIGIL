@@ -16,7 +16,7 @@ from ..models.trace import AgentRole, TraceAction
 from ..streaming.sse import bus
 from .llm_reviewer import review_code
 from .normalizer import normalize_findings
-from .runner import ScanError, run_semgrep
+from .runner import run_semgrep
 
 log = logging.getLogger(__name__)
 

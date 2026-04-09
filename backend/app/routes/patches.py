@@ -66,12 +66,14 @@ async def _run_verification(patch_id: str, repo_path: str) -> None:
             "scanner_rerun_clean": report.scanner_rerun_clean,
             "details": report.details,
         })
+        bus.close(run_id)
     except Exception as exc:
         log.exception("Verification failed for patch %s: %s", patch_id, exc)
         await bus.publish(run_id, AgentRole.VERIFIER, TraceAction.VERIFICATION_COMPLETED, {
             "patch_id": patch_id,
             "error": str(exc),
         })
+        bus.close(run_id)
 
 
 @router.post("/{patch_id}/verify", response_model=VerifyTriggerResponse, status_code=202)

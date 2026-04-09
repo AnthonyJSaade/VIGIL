@@ -8,7 +8,6 @@ All steps publish SSE events for real-time UI streaming.
 import logging
 from pathlib import Path
 
-from ..config import settings
 from ..db import get_finding, insert_patch, insert_verdict
 from ..models.critic import CriticVerdict
 from ..models.finding import Finding
@@ -21,21 +20,6 @@ from .surgeon import propose_patch
 log = logging.getLogger(__name__)
 
 MAX_ATTEMPTS = 2
-
-
-async def _read_source_file(finding: Finding) -> str:
-    """Read the full source file referenced by the finding."""
-    repo_path = settings.demo_repos_path / finding.run_id.split("-")[0]
-
-    for base in [settings.demo_repos_path]:
-        for repo_dir in base.iterdir():
-            candidate = repo_dir / finding.file_path
-            if candidate.is_file():
-                return candidate.read_text(errors="replace")
-
-    raise FileNotFoundError(
-        f"Source file {finding.file_path} not found in any demo repo"
-    )
 
 
 async def _read_source_from_repo(finding: Finding, repo_path: Path) -> str:

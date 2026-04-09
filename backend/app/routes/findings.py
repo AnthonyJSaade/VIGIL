@@ -1,14 +1,17 @@
 """Findings explorer — list, inspect, and trigger patch pipeline for findings."""
 
 import logging
+from pathlib import Path
 
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Query
 from pydantic import BaseModel
 
 from ..agents.orchestrator import run_patch_review_loop
 from ..config import settings
-from ..db import get_finding, get_findings_by_run, get_run, get_patches_by_finding
+from ..db import get_finding, get_findings_by_run, get_run, get_patches_by_finding, get_verdict_by_patch
 from ..models.finding import SeverityLevel
+from ..models.trace import AgentRole, TraceAction
+from ..streaming.sse import bus
 from .repos import CURATED_REPOS
 
 log = logging.getLogger(__name__)
@@ -105,11 +108,17 @@ class PatchTriggerResponse(BaseModel):
 
 async def _run_patch_pipeline(finding_id: str, repo_path: str) -> None:
     """Background task: run the Surgeon-Critic loop for a finding."""
-    from pathlib import Path
     try:
         await run_patch_review_loop(finding_id, Path(repo_path))
     except Exception as exc:
         log.exception("Patch pipeline failed for finding %s: %s", finding_id, exc)
+        finding = await get_finding(finding_id)
+        if finding:
+            await bus.publish(finding.run_id, AgentRole.SURGEON, TraceAction.PATCH_PROPOSED, {
+                "finding_id": finding_id,
+                "status": "error",
+                "error": str(exc),
+            })
 
 
 @router.post("/api/findings/{finding_id}/patch", response_model=PatchTriggerResponse, status_code=202)
@@ -154,8 +163,6 @@ async def list_patches(finding_id: str) -> list[PatchResult]:
     finding = await get_finding(finding_id)
     if finding is None:
         raise HTTPException(status_code=404, detail="Finding not found")
-
-    from ..db import get_verdict_by_patch
 
     patches = await get_patches_by_finding(finding_id)
     results = []

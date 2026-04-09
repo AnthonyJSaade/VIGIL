@@ -47,11 +47,13 @@ async def _execute_scan(run_id: str, repo_path: Path) -> None:
         await update_run_status(run_id, RunStatus.FAILED)
         await bus.publish(run_id, AgentRole.HUNTER, TraceAction.SCAN_COMPLETED,
                           {"error": str(exc)})
+        bus.close(run_id)
     except Exception as exc:
         log.exception("unexpected error during scan for run %s", run_id)
         await update_run_status(run_id, RunStatus.FAILED)
         await bus.publish(run_id, AgentRole.HUNTER, TraceAction.SCAN_COMPLETED,
                           {"error": str(exc)})
+        bus.close(run_id)
 
 
 @router.post("", response_model=RunSummary, status_code=201)
