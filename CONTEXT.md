@@ -7,7 +7,7 @@
 2026-04-08
 
 ## Current Phase
-**Phase 3 complete + Hunter expansion** — Run API, SSE event bus, streaming endpoint, and hybrid scan pipeline (Semgrep + LLM review) are built. Ready for Phase 4 (Findings Explorer).
+**Phase 4 complete** — Findings explorer endpoints built. Ready for Phase 5 (Surgeon patch pipeline).
 
 ## What Exists
 
@@ -38,10 +38,10 @@
 | `backend/app/streaming/sse.py` | `EventBus` class — in-memory publish/subscribe per run_id. Publishes to all SSE subscribers + persists as TraceEvent. Singleton `bus` instance. |
 | `backend/app/routes/repos.py` | `GET /api/repos` — returns hardcoded curated demo repo list |
 | `backend/app/routes/runs.py` | `POST /api/runs` — creates run, launches Hunter as background task. `GET /api/runs/{id}` — returns run metadata. Background task: calls `run_full_scan()` orchestrator (Semgrep + LLM review). |
+| `backend/app/routes/findings.py` | `GET /api/runs/{run_id}/findings` — findings list (filterable by severity, scanner). `GET /api/findings/{id}` — single finding detail with snippet + metadata. |
 | `backend/app/routes/stream.py` | `GET /api/runs/{id}/stream` — SSE endpoint via StreamingResponse |
 
 ## What Does NOT Exist Yet
-- No findings detail endpoints (Phase 4)
 - No Surgeon LLM agent (Phase 5)
 - No Critic LLM agent (Phase 6)
 - No verification pipeline (Phase 7)
@@ -100,10 +100,10 @@ Implemented:
 - `POST /api/runs` — start audit run (launches bg scan)
 - `GET /api/runs/{id}` — run metadata + status
 - `GET /api/runs/{id}/stream` — SSE event stream (text/event-stream)
+- `GET /api/runs/{run_id}/findings` — findings list (filterable by severity, scanner)
+- `GET /api/findings/{id}` — single finding detail with snippet + metadata
 
 To be implemented:
-- `GET /api/runs/{id}/findings` — findings list (Phase 4)
-- `GET /api/findings/{id}` — finding detail (Phase 4)
 - `POST /api/findings/{id}/patch` — trigger Surgeon-Critic loop (Phase 5-6)
 - `POST /api/patches/{id}/verify` — sandbox verification (Phase 7)
 - `GET /api/runs/{id}/export` — HTML report or ZIP bundle (Phase 8)
@@ -137,3 +137,4 @@ To be implemented:
 | 2026-04-08 | Pre-Phase 3 review: fixed severity ordering bug (CASE expression), added insert_findings_batch, expanded db.py smoke test (Run + Finding + TraceEvent). |
 | 2026-04-08 | Phase 3 complete: SSE EventBus (publish/subscribe per run_id, auto-persists TraceEvents), GET /api/repos, POST /api/runs (bg scan task), GET /api/runs/{id}, GET /api/runs/{id}/stream (SSE). All routes wired into main.py. Verified with live server. |
 | 2026-04-08 | Hunter expansion: Added hybrid scan pipeline. Finding model gets `confidence` field (float, Semgrep=1.0, LLM=0.6-0.9). TraceAction gets LLM_REVIEW_STARTED/COMPLETED. New `scanner/llm_reviewer.py` (Claude code review, skips Semgrep duplicates, structured JSON output). New `scanner/orchestrator.py` (two-phase pipeline, deduplication with 3-line tolerance, SSE publishing). `routes/runs.py` now delegates to orchestrator instead of calling Semgrep directly. DB schema updated with `confidence REAL` column. All verified. |
+| 2026-04-08 | Phase 4 complete: Findings explorer — `GET /api/runs/{run_id}/findings` (filterable by severity and scanner) + `GET /api/findings/{id}` (full detail with snippet + metadata). Wired into main.py. |
