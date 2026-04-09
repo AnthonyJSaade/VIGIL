@@ -6,7 +6,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from .db import init_db
-from .routes import findings, repos, runs, stream
+from .routes import findings, patches, repos, runs, stream
 
 
 @asynccontextmanager
@@ -26,6 +26,7 @@ app.add_middleware(
 )
 
 app.include_router(findings.router)
+app.include_router(patches.router)
 app.include_router(repos.router)
 app.include_router(runs.router)
 app.include_router(stream.router)
