@@ -1,0 +1,498 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Vigil Security Report — {{ run.repo_id }}</title>
+<style>
+  :root {
+    --bg: #0f1117;
+    --surface: #1a1d27;
+    --surface-hover: #22263a;
+    --border: #2a2e3e;
+    --text: #e1e4ed;
+    --text-muted: #8b90a0;
+    --hunter: #06b6d4;
+    --hunter-bg: rgba(6, 182, 212, 0.1);
+    --surgeon: #f59e0b;
+    --surgeon-bg: rgba(245, 158, 11, 0.1);
+    --critic: #a78bfa;
+    --critic-bg: rgba(167, 139, 250, 0.1);
+    --verifier: #22c55e;
+    --verifier-bg: rgba(34, 197, 94, 0.1);
+    --error: #ef4444;
+    --error-bg: rgba(239, 68, 68, 0.12);
+    --warning: #f59e0b;
+    --warning-bg: rgba(245, 158, 11, 0.12);
+    --info: #3b82f6;
+    --info-bg: rgba(59, 130, 246, 0.12);
+    --diff-add: #22c55e;
+    --diff-add-bg: rgba(34, 197, 94, 0.12);
+    --diff-del: #ef4444;
+    --diff-del-bg: rgba(239, 68, 68, 0.12);
+    --diff-hunk: #a78bfa;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    line-height: 1.6;
+    padding: 2rem;
+  }
+
+  .container { max-width: 1100px; margin: 0 auto; }
+
+  /* --- Header --- */
+  .header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    border-bottom: 1px solid var(--border);
+    padding-bottom: 1.5rem;
+    margin-bottom: 2rem;
+  }
+  .header h1 {
+    font-size: 1.75rem;
+    font-weight: 700;
+    letter-spacing: -0.025em;
+  }
+  .header h1 span { color: var(--hunter); }
+  .header-meta { text-align: right; color: var(--text-muted); font-size: 0.85rem; }
+  .header-meta strong { color: var(--text); }
+
+  /* --- Status badge --- */
+  .status-badge {
+    display: inline-block;
+    padding: 0.15rem 0.6rem;
+    border-radius: 9999px;
+    font-size: 0.75rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+  }
+  .status-completed { background: var(--verifier-bg); color: var(--verifier); }
+  .status-failed { background: var(--error-bg); color: var(--error); }
+  .status-scanning { background: var(--hunter-bg); color: var(--hunter); }
+  .status-pending { background: rgba(139, 144, 160, 0.15); color: var(--text-muted); }
+
+  /* --- Summary cards --- */
+  .summary {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+    gap: 1rem;
+    margin-bottom: 2.5rem;
+  }
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 0.75rem;
+    padding: 1.25rem;
+  }
+  .card-label { font-size: 0.75rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 0.25rem; }
+  .card-value { font-size: 1.75rem; font-weight: 700; }
+  .card-value.error-count { color: var(--error); }
+  .card-value.warning-count { color: var(--warning); }
+  .card-value.info-count { color: var(--info); }
+  .card-value.hunter-color { color: var(--hunter); }
+  .card-value.verifier-color { color: var(--verifier); }
+
+  /* --- Section headings --- */
+  .section-title {
+    font-size: 1.25rem;
+    font-weight: 600;
+    margin-bottom: 1rem;
+    padding-bottom: 0.5rem;
+    border-bottom: 1px solid var(--border);
+  }
+
+  /* --- Findings table --- */
+  .findings-table {
+    width: 100%;
+    border-collapse: collapse;
+    margin-bottom: 2.5rem;
+  }
+  .findings-table th {
+    text-align: left;
+    font-size: 0.7rem;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--text-muted);
+    padding: 0.6rem 0.75rem;
+    border-bottom: 1px solid var(--border);
+  }
+  .findings-table td {
+    padding: 0.6rem 0.75rem;
+    border-bottom: 1px solid var(--border);
+    font-size: 0.875rem;
+    vertical-align: top;
+  }
+  .findings-table tr:hover td { background: var(--surface-hover); }
+
+  .severity-badge {
+    display: inline-block;
+    padding: 0.1rem 0.5rem;
+    border-radius: 4px;
+    font-size: 0.7rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+  }
+  .severity-error { background: var(--error-bg); color: var(--error); }
+  .severity-warning { background: var(--warning-bg); color: var(--warning); }
+  .severity-info { background: var(--info-bg); color: var(--info); }
+
+  .scanner-tag {
+    display: inline-block;
+    padding: 0.1rem 0.4rem;
+    border-radius: 4px;
+    font-size: 0.7rem;
+    background: var(--surface-hover);
+    color: var(--text-muted);
+  }
+
+  .confidence-bar {
+    display: inline-block;
+    width: 3rem;
+    height: 0.35rem;
+    background: var(--border);
+    border-radius: 2px;
+    overflow: hidden;
+    vertical-align: middle;
+    margin-right: 0.35rem;
+  }
+  .confidence-fill {
+    height: 100%;
+    border-radius: 2px;
+    background: var(--hunter);
+  }
+
+  /* --- Finding detail blocks --- */
+  .finding-detail {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 0.75rem;
+    padding: 1.25rem;
+    margin-bottom: 1.5rem;
+  }
+  .finding-detail-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 0.75rem;
+  }
+  .finding-detail-header h3 {
+    font-size: 1rem;
+    font-weight: 600;
+  }
+  .finding-message {
+    color: var(--text-muted);
+    font-size: 0.875rem;
+    margin-bottom: 1rem;
+  }
+  .finding-location {
+    font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', monospace;
+    font-size: 0.8rem;
+    color: var(--text-muted);
+    margin-bottom: 0.75rem;
+  }
+
+  /* --- Code / Diff blocks --- */
+  pre {
+    font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', monospace;
+    font-size: 0.8rem;
+    line-height: 1.55;
+    overflow-x: auto;
+    border-radius: 0.5rem;
+    padding: 1rem;
+    background: #13151e;
+    border: 1px solid var(--border);
+  }
+  .diff-line { display: block; padding: 0 0.5rem; }
+  .diff-add { background: var(--diff-add-bg); color: var(--diff-add); }
+  .diff-del { background: var(--diff-del-bg); color: var(--diff-del); }
+  .diff-hunk { color: var(--diff-hunk); font-weight: 600; }
+  .diff-ctx { color: var(--text-muted); }
+
+  .snippet-pre {
+    margin-bottom: 1rem;
+  }
+
+  /* --- Patch attempt --- */
+  .patch-attempt {
+    margin-top: 1rem;
+    padding-top: 1rem;
+    border-top: 1px solid var(--border);
+  }
+  .patch-label {
+    font-size: 0.8rem;
+    font-weight: 600;
+    color: var(--surgeon);
+    margin-bottom: 0.5rem;
+  }
+  .patch-explanation {
+    color: var(--text-muted);
+    font-size: 0.85rem;
+    margin-bottom: 0.75rem;
+  }
+
+  /* --- Verdict --- */
+  .verdict {
+    margin-top: 0.75rem;
+    padding: 0.75rem 1rem;
+    border-radius: 0.5rem;
+    font-size: 0.85rem;
+  }
+  .verdict-approved {
+    background: var(--verifier-bg);
+    border: 1px solid rgba(34, 197, 94, 0.25);
+  }
+  .verdict-rejected {
+    background: var(--error-bg);
+    border: 1px solid rgba(239, 68, 68, 0.25);
+  }
+  .verdict-label {
+    font-weight: 600;
+    margin-bottom: 0.25rem;
+  }
+  .verdict-approved .verdict-label { color: var(--verifier); }
+  .verdict-rejected .verdict-label { color: var(--error); }
+  .verdict-reasoning { color: var(--text-muted); }
+  .verdict-concerns {
+    margin-top: 0.5rem;
+    padding-left: 1.25rem;
+    color: var(--text-muted);
+    font-size: 0.8rem;
+  }
+
+  /* --- Verification result --- */
+  .verification {
+    margin-top: 0.75rem;
+    padding: 0.75rem 1rem;
+    border-radius: 0.5rem;
+    font-size: 0.85rem;
+  }
+  .verification-pass {
+    background: var(--verifier-bg);
+    border: 1px solid rgba(34, 197, 94, 0.25);
+    color: var(--verifier);
+  }
+  .verification-fail {
+    background: var(--error-bg);
+    border: 1px solid rgba(239, 68, 68, 0.25);
+    color: var(--error);
+  }
+
+  /* --- Trace timeline --- */
+  .timeline { margin-bottom: 2.5rem; }
+  .timeline-item {
+    display: flex;
+    gap: 1rem;
+    padding: 0.5rem 0;
+    font-size: 0.85rem;
+    border-bottom: 1px solid var(--border);
+  }
+  .timeline-time {
+    flex-shrink: 0;
+    width: 5.5rem;
+    font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', monospace;
+    font-size: 0.75rem;
+    color: var(--text-muted);
+    padding-top: 0.1rem;
+  }
+  .timeline-role {
+    flex-shrink: 0;
+    width: 5rem;
+    font-size: 0.7rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    padding-top: 0.15rem;
+  }
+  .role-hunter { color: var(--hunter); }
+  .role-surgeon { color: var(--surgeon); }
+  .role-critic { color: var(--critic); }
+  .role-verifier { color: var(--verifier); }
+  .timeline-action { color: var(--text); }
+
+  /* --- Footer --- */
+  .footer {
+    margin-top: 2rem;
+    padding-top: 1rem;
+    border-top: 1px solid var(--border);
+    color: var(--text-muted);
+    font-size: 0.75rem;
+    text-align: center;
+  }
+
+  /* --- Print styles --- */
+  @media print {
+    body { background: #fff; color: #111; padding: 0.5in; }
+    .card { border-color: #ddd; }
+    pre { background: #f5f5f5; border-color: #ddd; }
+    .diff-add { background: #e6ffed; color: #1a7f37; }
+    .diff-del { background: #ffebe9; color: #cf222e; }
+    .findings-table tr:hover td { background: transparent; }
+  }
+</style>
+</head>
+<body>
+<div class="container">
+
+  <!-- Header -->
+  <div class="header">
+    <div>
+      <h1><span>VIGIL</span> Security Report</h1>
+    </div>
+    <div class="header-meta">
+      <div><strong>Repository:</strong> {{ run.repo_id }}</div>
+      <div><strong>Run ID:</strong> {{ run.id[:12] }}</div>
+      <div><strong>Date:</strong> {{ run.created_at.strftime('%Y-%m-%d %H:%M UTC') }}</div>
+      <div style="margin-top: 0.35rem;">
+        <span class="status-badge status-{{ run.status }}">{{ run.status }}</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- Summary cards -->
+  <div class="summary">
+    <div class="card">
+      <div class="card-label">Total Findings</div>
+      <div class="card-value hunter-color">{{ findings | length }}</div>
+    </div>
+    <div class="card">
+      <div class="card-label">Errors</div>
+      <div class="card-value error-count">{{ stats.error_count }}</div>
+    </div>
+    <div class="card">
+      <div class="card-label">Warnings</div>
+      <div class="card-value warning-count">{{ stats.warning_count }}</div>
+    </div>
+    <div class="card">
+      <div class="card-label">Info</div>
+      <div class="card-value info-count">{{ stats.info_count }}</div>
+    </div>
+    <div class="card">
+      <div class="card-label">Patches Proposed</div>
+      <div class="card-value" style="color: var(--surgeon);">{{ stats.total_patches }}</div>
+    </div>
+    <div class="card">
+      <div class="card-label">Approved</div>
+      <div class="card-value verifier-color">{{ stats.approved_count }}</div>
+    </div>
+  </div>
+
+  <!-- Findings overview table -->
+  <h2 class="section-title">Findings Overview</h2>
+  {% if findings %}
+  <table class="findings-table">
+    <thead>
+      <tr>
+        <th>Severity</th>
+        <th>Rule</th>
+        <th>File</th>
+        <th>Line</th>
+        <th>Scanner</th>
+        <th>Confidence</th>
+      </tr>
+    </thead>
+    <tbody>
+    {% for item in findings_data %}
+      <tr>
+        <td><span class="severity-badge severity-{{ item.finding.severity }}">{{ item.finding.severity }}</span></td>
+        <td>{{ item.finding.rule_id }}</td>
+        <td>{{ item.finding.file_path }}</td>
+        <td>{{ item.finding.start_line }}{% if item.finding.end_line != item.finding.start_line %}–{{ item.finding.end_line }}{% endif %}</td>
+        <td><span class="scanner-tag">{{ item.finding.scanner }}</span></td>
+        <td>
+          <span class="confidence-bar"><span class="confidence-fill" style="width: {{ (item.finding.confidence * 100) | int }}%"></span></span>
+          {{ '%.0f' | format(item.finding.confidence * 100) }}%
+        </td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p style="color: var(--text-muted); margin-bottom: 2.5rem;">No findings discovered.</p>
+  {% endif %}
+
+  <!-- Finding details with patches -->
+  {% for item in findings_data %}
+  <div class="finding-detail">
+    <div class="finding-detail-header">
+      <h3>
+        <span class="severity-badge severity-{{ item.finding.severity }}">{{ item.finding.severity }}</span>
+        &nbsp;{{ item.finding.rule_id }}
+      </h3>
+      <span class="scanner-tag">{{ item.finding.scanner }}</span>
+    </div>
+    <div class="finding-message">{{ item.finding.message }}</div>
+    <div class="finding-location">{{ item.finding.file_path }}:{{ item.finding.start_line }}{% if item.finding.end_line != item.finding.start_line %}–{{ item.finding.end_line }}{% endif %}</div>
+
+    {% if item.finding.snippet %}
+    <pre class="snippet-pre"><code>{{ item.finding.snippet }}</code></pre>
+    {% endif %}
+
+    {% for pa in item.patches %}
+    <div class="patch-attempt">
+      <div class="patch-label">Patch Attempt {{ pa.patch.attempt }}</div>
+      <div class="patch-explanation">{{ pa.patch.explanation }}</div>
+      <pre>{% for line in pa.diff_lines %}<span class="diff-line {{ line.cls }}">{{ line.text }}</span>{% endfor %}</pre>
+
+      {% if pa.verdict %}
+      <div class="verdict {{ 'verdict-approved' if pa.verdict.approved else 'verdict-rejected' }}">
+        <div class="verdict-label">
+          {% if pa.verdict.approved %}Approved{% else %}Rejected{% endif %} by Critic
+        </div>
+        <div class="verdict-reasoning">{{ pa.verdict.reasoning }}</div>
+        {% if pa.verdict.concerns %}
+        <ul class="verdict-concerns">
+          {% for concern in pa.verdict.concerns %}
+          <li>{{ concern }}</li>
+          {% endfor %}
+        </ul>
+        {% endif %}
+      </div>
+      {% endif %}
+
+      {% if pa.verification %}
+      <div class="verification {{ 'verification-pass' if pa.verification.scanner_rerun_clean else 'verification-fail' }}">
+        {% if pa.verification.scanner_rerun_clean %}
+          Scanner rerun: CLEAN — vulnerability no longer detected
+        {% else %}
+          Scanner rerun: FAILED — vulnerability still present
+        {% endif %}
+        {% if pa.verification.tests_passed is not none %}
+          &nbsp;|&nbsp;Tests: {{ 'PASSED' if pa.verification.tests_passed else 'FAILED' }}
+        {% endif %}
+      </div>
+      {% endif %}
+    </div>
+    {% endfor %}
+  </div>
+  {% endfor %}
+
+  <!-- Trace timeline -->
+  {% if trace_events %}
+  <h2 class="section-title">Agent Trace Timeline</h2>
+  <div class="timeline">
+    {% for evt in trace_events %}
+    <div class="timeline-item">
+      <div class="timeline-time">{{ evt.timestamp.strftime('%H:%M:%S') }}</div>
+      <div class="timeline-role role-{{ evt.role }}">{{ evt.role }}</div>
+      <div class="timeline-action">{{ evt.action | replace('_', ' ') | title }}{% if evt.payload %} — <span style="color: var(--text-muted);">{{ evt.payload | tojson | truncate(120) }}</span>{% endif %}</div>
+    </div>
+    {% endfor %}
+  </div>
+  {% endif %}
+
+  <!-- Footer -->
+  <div class="footer">
+    Generated by <strong>Vigil</strong> — Multi-Agent DevSecOps Gatekeeper
+  </div>
+
+</div>
+</body>
+</html>

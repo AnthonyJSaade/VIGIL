@@ -6,7 +6,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from .db import init_db
-from .routes import findings, patches, repos, runs, stream
+from .routes import export, findings, patches, repos, runs, stream
 
 
 @asynccontextmanager
@@ -25,6 +25,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+app.include_router(export.router)
 app.include_router(findings.router)
 app.include_router(patches.router)
 app.include_router(repos.router)

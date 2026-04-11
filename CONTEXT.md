@@ -7,7 +7,7 @@
 2026-04-08
 
 ## Current Phase
-**Phase 7 complete** — Verification pipeline built. Ready for Phase 8 (Export bundle).
+**Phase 8 complete** — Export bundle built. Ready for Phase 9 (UI).
 
 ## What Exists
 
@@ -45,9 +45,12 @@
 | `backend/app/routes/findings.py` | `GET /api/runs/{run_id}/findings` (filterable), `GET /api/findings/{id}` (detail), `POST /api/findings/{id}/patch` (trigger Surgeon-Critic loop), `GET /api/findings/{id}/patches` (list patch attempts with verdicts). |
 | `backend/app/routes/patches.py` | `POST /api/patches/{id}/verify` — triggers sandbox verification (only if Critic approved, 202). `GET /api/patches/{id}/verification` — returns verification result. |
 | `backend/app/routes/stream.py` | `GET /api/runs/{id}/stream` — SSE endpoint via StreamingResponse |
+| `backend/app/export/__init__.py` | Export module package marker |
+| `backend/app/export/report_template.html` | Jinja2 template — self-contained HTML with embedded CSS, dark theme, agent color-coding (hunter=teal, surgeon=amber, critic=purple, verifier=green), diff syntax highlighting, trace timeline. Print-friendly. |
+| `backend/app/export/bundle.py` | `generate_html_report(run_id) -> str` and `generate_zip_bundle(run_id) -> bytes`. Collects all run data (findings, patches, verdicts, verifications, trace events), renders template. ZIP includes report.html + findings.json + trace.json + individual diffs and verdicts. |
+| `backend/app/routes/export.py` | `GET /api/runs/{run_id}/export?format=html|zip` — downloads self-contained HTML report or ZIP bundle. Content-Disposition attachment headers. 404 if run not found. |
 
 ## What Does NOT Exist Yet
-- No export bundle (Phase 8)
 - No frontend code (Phase 9)
 - No demo repo (Phase 10)
 - No Docker setup (Phase 10)
@@ -109,8 +112,9 @@ Implemented:
 - `POST /api/patches/{id}/verify` — trigger sandbox verification (only if Critic approved, 202)
 - `GET /api/patches/{id}/verification` — verification result
 
-To be implemented:
-- `GET /api/runs/{id}/export` — HTML report or ZIP bundle (Phase 8)
+- `GET /api/runs/{id}/export?format=html|zip` — export HTML report or ZIP bundle (attachment download)
+
+All backend API endpoints are now implemented.
 
 ## Build Order
 1. Contracts and data models
@@ -144,3 +148,5 @@ To be implemented:
 | 2026-04-08 | Phase 4 complete: Findings explorer — `GET /api/runs/{run_id}/findings` (filterable by severity and scanner) + `GET /api/findings/{id}` (full detail with snippet + metadata). Wired into main.py. |
 | 2026-04-08 | Phases 5+6 complete: Surgeon agent (`agents/surgeon.py`) generates minimal unified diffs via Claude. Critic agent (`agents/critic.py`) independently reviews patches — no access to Surgeon reasoning. Feedback loop orchestrator (`agents/orchestrator.py`) runs max 2 attempts with Critic concerns fed back to Surgeon. `POST /api/findings/{id}/patch` triggers the loop as a bg task (202). `GET /api/findings/{id}/patches` returns all attempts with verdicts. All SSE events published. |
 | 2026-04-08 | Phase 7 complete: Verification pipeline — `verification/sandbox.py` copies repo to temp dir, applies diff via `patch -p1`, reruns Semgrep, checks if original rule no longer fires. `routes/patches.py` adds `POST /api/patches/{id}/verify` (only if Critic approved) and `GET /api/patches/{id}/verification`. SSE events for verification_started/completed. |
+| 2026-04-08 | Pre-Phase 8 review: fixed 3 bugs (silent patch pipeline failure on SSE, bus.close() never called, dead _read_source_file) + 2 hygiene issues (lazy imports, unused import). |
+| 2026-04-08 | Phase 8 complete: Export bundle — `export/report_template.html` (Jinja2, self-contained dark theme, agent color-coding, diff rendering, trace timeline, print-friendly). `export/bundle.py` collects all run data, renders HTML or generates ZIP (report + JSON + diffs). `routes/export.py` serves `GET /api/runs/{id}/export?format=html|zip`. All backend API endpoints now implemented. |
