@@ -41,6 +41,7 @@ async def _execute_scan(run_id: str, repo_path: Path) -> None:
 
         await update_run_status(run_id, RunStatus.COMPLETED,
                                 finding_count=len(findings))
+        bus.close(run_id)
 
     except ScanError as exc:
         log.error("scan failed for run %s: %s", run_id, exc)
