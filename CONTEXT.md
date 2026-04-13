@@ -4,10 +4,10 @@
 > Updated after each significant change.
 
 ## Last Updated
-2026-04-08
+2026-04-13
 
 ## Current Phase
-**Phase 8 complete** — Export bundle built. Ready for Phase 9 (UI).
+**Phase 9 started** — Next.js + TypeScript + Tailwind app in `frontend/` with a curated-repo selection home (`page.tsx` calls `GET /api/repos`). Remaining MVP UI (run flow, findings, patches, critic, verification, export, SSE) not built yet.
 
 ## What Exists
 
@@ -49,9 +49,15 @@
 | `backend/app/export/report_template.html` | Jinja2 template — self-contained HTML with embedded CSS, dark theme, agent color-coding (hunter=teal, surgeon=amber, critic=purple, verifier=green), diff syntax highlighting, trace timeline. Print-friendly. |
 | `backend/app/export/bundle.py` | `generate_html_report(run_id) -> str` and `generate_zip_bundle(run_id) -> bytes`. Collects all run data (findings, patches, verdicts, verifications, trace events), renders template. ZIP includes report.html + findings.json + trace.json + individual diffs and verdicts. |
 | `backend/app/routes/export.py` | `GET /api/runs/{run_id}/export?format=html|zip` — downloads self-contained HTML report or ZIP bundle. Content-Disposition attachment headers. 404 if run not found. |
+| `frontend/package.json` | Next.js 16 (App Router), React 19, TypeScript, Tailwind CSS v4 (`@tailwindcss/postcss`), ESLint (`eslint-config-next`) |
+| `frontend/next.config.ts` | Default Next config scaffold |
+| `frontend/src/app/layout.tsx` | Root layout: Geist / Geist Mono fonts, `globals.css`, default metadata (still create-next-app placeholders) |
+| `frontend/src/app/globals.css` | Tailwind v4 entry (`@import "tailwindcss"`) |
+| `frontend/src/app/page.tsx` | Home (async server component): `fetch("http://localhost:8000/api/repos", { cache: "no-store" })`, maps JSON to `Repo[]`, renders `RepoCards` |
+| `frontend/src/app/repo-cards.tsx` | Client component (`"use client"`): responsive grid of repo cards; click toggles selection; language badge colors (fallback for unknown languages); displays name, description, language, `path` |
 
 ## What Does NOT Exist Yet
-- No frontend code (Phase 9)
+- Phase 9 UI beyond repo picker: no run start, findings explorer, patch/critic flow, verification results, export download, or SSE wiring from the browser yet
 - No demo repo (Phase 10)
 - No Docker setup (Phase 10)
 
@@ -129,7 +135,7 @@ All backend API endpoints are now implemented.
 10. Demo repo + Docker
 
 ## Team
-- 2-person team
+- 2-person team (Anthony: backend + repo root through Phase 8; Michael: `frontend/` Next.js scaffold and repo-selection UI)
 
 ## Repository
 - GitHub: https://github.com/AnthonyJSaade/VIGIL
@@ -150,3 +156,4 @@ All backend API endpoints are now implemented.
 | 2026-04-08 | Phase 7 complete: Verification pipeline — `verification/sandbox.py` copies repo to temp dir, applies diff via `patch -p1`, reruns Semgrep, checks if original rule no longer fires. `routes/patches.py` adds `POST /api/patches/{id}/verify` (only if Critic approved) and `GET /api/patches/{id}/verification`. SSE events for verification_started/completed. |
 | 2026-04-08 | Pre-Phase 8 review: fixed 3 bugs (silent patch pipeline failure on SSE, bus.close() never called, dead _read_source_file) + 2 hygiene issues (lazy imports, unused import). |
 | 2026-04-08 | Phase 8 complete: Export bundle — `export/report_template.html` (Jinja2, self-contained dark theme, agent color-coding, diff rendering, trace timeline, print-friendly). `export/bundle.py` collects all run data, renders HTML or generates ZIP (report + JSON + diffs). `routes/export.py` serves `GET /api/runs/{id}/export?format=html|zip`. All backend API endpoints now implemented. |
+| 2026-04-13 | Phase 9 kickoff: scaffolded Next.js app under `frontend/` (TypeScript, Tailwind v4, App Router). Home at `src/app/page.tsx` fetches curated repos from `http://localhost:8000/api/repos` (no-store). `repo-cards.tsx` client grid for selecting a repo (local selection state only; not wired to `POST /api/runs` yet). |
