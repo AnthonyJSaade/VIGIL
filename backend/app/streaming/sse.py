@@ -52,7 +52,7 @@ class EventBus:
         })
 
         for queue in self._get_queues(run_id):
-            await queue.put(f"event: {event.action.value}\ndata: {sse_data}\n\n")
+            await queue.put(f"data: {sse_data}\n\n")
 
         return event
 

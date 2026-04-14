@@ -24,6 +24,7 @@ out/
 *.swp
 *.swo
 .DS_Store
+.cursor/plans/
 
 # Docker
 *.log

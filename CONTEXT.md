@@ -4,10 +4,10 @@
 > Updated after each significant change.
 
 ## Last Updated
-2026-04-13
+2026-04-14
 
 ## Current Phase
-**Phase 9 started** — Next.js + TypeScript + Tailwind app in `frontend/` with a curated-repo selection home (`page.tsx` calls `GET /api/repos`). Remaining MVP UI (run flow, findings, patches, critic, verification, export, SSE) not built yet.
+**Phase 9 complete + post-review fixes** — Full Next.js UI wired to all backend endpoints. Repo picker → Start Audit → live SSE feed → findings list → finding detail with code snippet → patch request + Critic verdict → sandbox verification → export download. Post-review sweep fixed SSE delivery bug, patch polling race condition, missing error handling, and React lint warnings. Ready for Phase 10 (demo repo + Docker).
 
 ## What Exists
 
@@ -51,13 +51,18 @@
 | `backend/app/routes/export.py` | `GET /api/runs/{run_id}/export?format=html|zip` — downloads self-contained HTML report or ZIP bundle. Content-Disposition attachment headers. 404 if run not found. |
 | `frontend/package.json` | Next.js 16 (App Router), React 19, TypeScript, Tailwind CSS v4 (`@tailwindcss/postcss`), ESLint (`eslint-config-next`) |
 | `frontend/next.config.ts` | Default Next config scaffold |
-| `frontend/src/app/layout.tsx` | Root layout: Geist / Geist Mono fonts, `globals.css`, default metadata (still create-next-app placeholders) |
+| `frontend/src/app/layout.tsx` | Root layout: Geist / Geist Mono fonts, `globals.css`, metadata set to "VIGIL — DevSecOps Gatekeeper" |
 | `frontend/src/app/globals.css` | Tailwind v4 entry (`@import "tailwindcss"`) |
 | `frontend/src/app/page.tsx` | Home (async server component): `fetch("http://localhost:8000/api/repos", { cache: "no-store" })`, maps JSON to `Repo[]`, renders `RepoCards` |
-| `frontend/src/app/repo-cards.tsx` | Client component (`"use client"`): responsive grid of repo cards; click toggles selection; language badge colors (fallback for unknown languages); displays name, description, language, `path` |
+| `frontend/src/app/repo-cards.tsx` | Client component: responsive repo card grid, selection toggle, "Start Audit" button calls `POST /api/runs` and navigates to `/runs/{id}` |
+| `frontend/src/app/runs/[run_id]/page.tsx` | Run page: fetches run status, renders `LiveFeed` (SSE), `FindingsList` on completion, export download links |
+| `frontend/src/app/findings/[finding_id]/page.tsx` | Finding detail: severity badge, code snippet with line numbers, confidence %, `PatchPanel` for Surgeon-Critic flow |
+| `frontend/src/components/live-feed.tsx` | SSE client via `EventSource`: connects to `/api/runs/{id}/stream`, renders scrolling agent event log with role colors |
+| `frontend/src/components/findings-list.tsx` | Filterable findings grid (by severity), links each finding to its detail page |
+| `frontend/src/components/severity-badge.tsx` | Colored severity pill (error=red, warning=yellow, info=blue) |
+| `frontend/src/components/patch-panel.tsx` | Patch request button, polls for results, renders unified diff (color-coded), Critic verdict, "Verify in Sandbox" button, verification result display |
 
 ## What Does NOT Exist Yet
-- Phase 9 UI beyond repo picker: no run start, findings explorer, patch/critic flow, verification results, export download, or SSE wiring from the browser yet
 - No demo repo (Phase 10)
 - No Docker setup (Phase 10)
 
@@ -157,3 +162,5 @@ All backend API endpoints are now implemented.
 | 2026-04-08 | Pre-Phase 8 review: fixed 3 bugs (silent patch pipeline failure on SSE, bus.close() never called, dead _read_source_file) + 2 hygiene issues (lazy imports, unused import). |
 | 2026-04-08 | Phase 8 complete: Export bundle — `export/report_template.html` (Jinja2, self-contained dark theme, agent color-coding, diff rendering, trace timeline, print-friendly). `export/bundle.py` collects all run data, renders HTML or generates ZIP (report + JSON + diffs). `routes/export.py` serves `GET /api/runs/{id}/export?format=html|zip`. All backend API endpoints now implemented. |
 | 2026-04-13 | Phase 9 kickoff: scaffolded Next.js app under `frontend/` (TypeScript, Tailwind v4, App Router). Home at `src/app/page.tsx` fetches curated repos from `http://localhost:8000/api/repos` (no-store). `repo-cards.tsx` client grid for selecting a repo (local selection state only; not wired to `POST /api/runs` yet). |
+| 2026-04-13 | Phase 9 complete: Full MVP UI built. (1) "Start Audit" button in `repo-cards.tsx` calls `POST /api/runs` and navigates to run page. (2) `/runs/[run_id]` page with SSE live feed (`EventSource`), findings list on completion, export buttons. (3) `/findings/[finding_id]` page with code snippet, confidence score, patch request + diff viewer, Critic verdict panel, sandbox verification trigger and result. (4) Shared components: `live-feed.tsx`, `findings-list.tsx`, `severity-badge.tsx`, `patch-panel.tsx`. (5) Layout metadata updated. Build passes cleanly (TypeScript + Next.js). |
+| 2026-04-14 | Post-review bug fixes: (1) **SSE delivery fix** — removed named `event:` field from SSE frames in `backend/app/streaming/sse.py` so `EventSource.onmessage` receives events (action is already in the JSON payload). (2) **Patch polling race fix** — `patch-panel.tsx` now keeps polling until a patch is approved or all 2 attempts are exhausted, instead of stopping at the first result (which hid the Critic retry). (3) **Home page error handling** — `page.tsx` catches backend-down errors and shows a fallback message instead of crashing. (4) **React lint fix** — wrapped `fetchRun` in `useCallback` in `runs/[run_id]/page.tsx` so dependency arrays are correct. (5) **Poll resilience** — `loadPatches` now catches network errors instead of throwing uncaught rejections every 2 s. (6) **Comment style alignment** — added JSDoc to complex functions in `patch-panel.tsx` and fixed header comment format in `severity-badge.tsx` to match backend docstring conventions. Build passes cleanly. |
