@@ -22,6 +22,87 @@ from ..scanner.normalizer import normalize_findings
 log = logging.getLogger(__name__)
 
 
+class PatchApplyError(Exception):
+    """Raised when a unified diff cannot be applied cleanly to a sandbox copy."""
+
+    def __init__(self, message: str, diagnostics: str = "") -> None:
+        super().__init__(message)
+        self.diagnostics = diagnostics
+
+
+def _extract_target_paths(diff: str) -> list[str]:
+    """Return the list of relative paths touched by *diff*.
+
+    Parses ``+++ b/path`` (``-p1`` style) and ``+++ path`` (``-p0`` style)
+    headers. Skips the ``/dev/null`` sentinel used for additions. Preserves
+    first-seen order and deduplicates.
+    """
+    seen: dict[str, None] = {}
+    for line in diff.splitlines():
+        if not line.startswith("+++ "):
+            continue
+        raw = line[4:].strip()
+        if not raw or raw == "/dev/null":
+            continue
+        # Strip a trailing tab/timestamp if present.
+        raw = raw.split("\t", 1)[0].strip()
+        if raw.startswith("b/"):
+            raw = raw[2:]
+        elif raw.startswith("./"):
+            raw = raw[2:]
+        raw = raw.lstrip("/")
+        if raw and raw not in seen:
+            seen[raw] = None
+    return list(seen.keys())
+
+
+async def apply_patch_in_temp(
+    patch_diff: str,
+    repo_path: Path,
+) -> tuple[dict[str, str], str]:
+    """Apply *patch_diff* to a temp copy of *repo_path* and return patched files.
+
+    Returns ``({relative_path: new_text}, diagnostics)`` where the dict holds
+    the post-patch contents of every file touched by the diff, and
+    ``diagnostics`` is the combined `patch` output (usually empty on success).
+
+    Raises :class:`PatchApplyError` if the diff cannot be applied or if the
+    diff does not reference any recognizable file paths.
+    """
+    targets = _extract_target_paths(patch_diff)
+    if not targets:
+        raise PatchApplyError(
+            "Could not identify any target files in the patch diff.",
+        )
+
+    sandbox_dir = Path(tempfile.mkdtemp(prefix="vigil-apply-"))
+    sandbox_repo = sandbox_dir / "repo"
+
+    try:
+        shutil.copytree(repo_path, sandbox_repo)
+        applied, diagnostics = await _apply_diff(sandbox_repo, patch_diff)
+        if not applied:
+            raise PatchApplyError(
+                "Patch failed to apply cleanly to the sandbox copy.",
+                diagnostics=diagnostics,
+            )
+
+        patched: dict[str, str] = {}
+        for rel in targets:
+            sandbox_file = sandbox_repo / rel
+            if not sandbox_file.is_file():
+                raise PatchApplyError(
+                    f"Patched file not found in sandbox: {rel}",
+                    diagnostics=diagnostics,
+                )
+            patched[rel] = sandbox_file.read_text(errors="replace")
+
+        return patched, diagnostics
+
+    finally:
+        shutil.rmtree(sandbox_dir, ignore_errors=True)
+
+
 async def _run_patch(sandbox_path: Path, diff: str, strip: int) -> tuple[int, str]:
     """Invoke ``patch -p<strip> --no-backup-if-mismatch -F 3`` inside *sandbox_path*.
 

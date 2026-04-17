@@ -289,6 +289,32 @@ export async function fetchVerification(patchId: string): Promise<VerificationRe
   return mapVerification(data)
 }
 
+export function patchedFileUrl(patchId: string): string {
+  return `${API_BASE}/api/patches/${patchId}/patched-file`
+}
+
+export interface ApplyPatchResult {
+  patchId: string
+  appliedFiles: string[]
+  backups: string[]
+}
+
+export async function applyPatch(patchId: string): Promise<ApplyPatchResult> {
+  const res = await fetch(`${API_BASE}/api/patches/${patchId}/apply`, { method: "POST" })
+  if (!res.ok) {
+    let detail = "Failed to apply patch"
+    try {
+      const body = await res.json()
+      if (body?.detail) detail = body.detail
+    } catch {
+      /* body not JSON */
+    }
+    throw new Error(detail)
+  }
+  const data: { patch_id: string; applied_files: string[]; backups: string[] } = await res.json()
+  return { patchId: data.patch_id, appliedFiles: data.applied_files, backups: data.backups }
+}
+
 export function sseUrl(runId: string): string {
   return `${API_BASE}/api/runs/${runId}/stream`
 }

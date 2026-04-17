@@ -1,8 +1,28 @@
 "use client"
 
 import { useState, useCallback, useEffect, useRef } from "react"
-import { Scissors, Eye, ShieldCheck, Loader2, CheckCircle2, XCircle, RefreshCw } from "lucide-react"
+import {
+  Scissors,
+  Eye,
+  ShieldCheck,
+  Loader2,
+  CheckCircle2,
+  XCircle,
+  RefreshCw,
+  Download,
+  Check,
+} from "lucide-react"
 import { Button } from "@/components/ui/button"
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog"
 import { AgentCard } from "./agent-card"
 import { DiffBlock } from "./code-block"
 import { cn } from "@/lib/utils"
@@ -11,6 +31,9 @@ import {
   fetchPatches,
   requestVerify,
   fetchVerification,
+  patchedFileUrl,
+  applyPatch,
+  type ApplyPatchResult,
   type PatchWithVerdict,
   type VerificationReport,
 } from "@/lib/api"
@@ -27,6 +50,10 @@ export function PatchPipeline({ findingId }: PatchPipelineProps) {
   const [attempts, setAttempts] = useState<PatchWithVerdict[]>([])
   const [verification, setVerification] = useState<VerificationReport | null>(null)
   const [errorMsg, setErrorMsg] = useState<string | null>(null)
+  const [applyOpen, setApplyOpen] = useState(false)
+  const [applying, setApplying] = useState(false)
+  const [applyResult, setApplyResult] = useState<ApplyPatchResult | null>(null)
+  const [applyError, setApplyError] = useState<string | null>(null)
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
   const clearPoll = useCallback(() => {
@@ -164,6 +191,22 @@ export function PatchPipeline({ findingId }: PatchPipelineProps) {
   const latestApproved = attempts.find((a) => a.verdict?.approved)
   const latestRejected = attempts.filter((a) => a.verdict && !a.verdict.approved)
   const hasApproval = !!latestApproved
+  const verifiedClean = !!verification?.scannerRerunClean
+
+  const confirmApply = useCallback(async () => {
+    if (!latestApproved) return
+    setApplying(true)
+    setApplyError(null)
+    try {
+      const result = await applyPatch(latestApproved.patch.id)
+      setApplyResult(result)
+      setApplyOpen(false)
+    } catch (err) {
+      setApplyError(err instanceof Error ? err.message : "Apply failed")
+    } finally {
+      setApplying(false)
+    }
+  }, [latestApproved])
 
   return (
     <div className="space-y-4">
@@ -330,6 +373,102 @@ export function PatchPipeline({ findingId }: PatchPipelineProps) {
           </div>
         </div>
       )}
+
+      {/* Verification clean — let the user ship the fix */}
+      {verifiedClean && latestApproved && (
+        <div className="rounded-lg border border-green-500/30 bg-green-500/5 p-6 space-y-3">
+          {applyResult ? (
+            <div className="space-y-2">
+              <div className="flex items-center justify-center gap-2">
+                <CheckCircle2 className="h-4 w-4 text-green-400" />
+                <span className="text-sm font-medium text-green-400">Fix applied</span>
+              </div>
+              <div className="text-xs text-muted-foreground text-center space-y-1">
+                <p>
+                  Updated:{" "}
+                  {applyResult.appliedFiles.map((f) => (
+                    <code key={f} className="font-mono ml-1">
+                      {f}
+                    </code>
+                  ))}
+                </p>
+                {applyResult.backups.length > 0 && (
+                  <p>
+                    Backup:{" "}
+                    {applyResult.backups.map((b) => (
+                      <code key={b} className="font-mono ml-1">
+                        {b}
+                      </code>
+                    ))}
+                  </p>
+                )}
+              </div>
+            </div>
+          ) : (
+            <>
+              <p className="text-sm text-foreground text-center">
+                Fix verified. Apply it to your file:
+              </p>
+              <div className="flex gap-3 justify-center flex-wrap">
+                <Button asChild variant="outline" className="gap-2">
+                  <a href={patchedFileUrl(latestApproved.patch.id)} download>
+                    <Download className="h-4 w-4" />
+                    Download Patched File
+                  </a>
+                </Button>
+                <Button
+                  onClick={() => {
+                    setApplyError(null)
+                    setApplyOpen(true)
+                  }}
+                  className="gap-2 bg-green-600 text-white hover:bg-green-500"
+                >
+                  <Check className="h-4 w-4" />
+                  Apply Fix to File
+                </Button>
+              </div>
+              {applyError && (
+                <p className="text-xs text-red-400 text-center whitespace-pre-wrap">
+                  {applyError}
+                </p>
+              )}
+            </>
+          )}
+        </div>
+      )}
+
+      <AlertDialog open={applyOpen} onOpenChange={setApplyOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Apply fix to file?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This will overwrite the source file in the demo repo with the verified
+              patched version. A timestamped backup (<code className="font-mono">.vigil-backup-…</code>)
+              will be written next to the original so the demo stays re-runnable.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={applying}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={(e) => {
+                e.preventDefault()
+                confirmApply()
+              }}
+              disabled={applying}
+              className="bg-green-600 text-white hover:bg-green-500"
+            >
+              {applying ? (
+                <span className="flex items-center gap-2">
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  Applying…
+                </span>
+              ) : (
+                "Apply fix"
+              )}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       {/* Done without approval (all rejected) */}
       {stage === "done" && !hasApproval && !verification && latestRejected.length > 0 && (
