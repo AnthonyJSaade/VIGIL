@@ -1,0 +1,25 @@
+services:
+  backend:
+    build: ./backend
+    ports:
+      - "8000:8000"
+    environment:
+      - VIGIL_ANTHROPIC_API_KEY=${VIGIL_ANTHROPIC_API_KEY}
+      - VIGIL_DB_PATH=/data/vigil.db
+      - VIGIL_DEMO_REPOS_PATH=/demo-repos
+    volumes:
+      - ./demo-repos:/demo-repos:ro
+      - vigil-data:/data
+
+  frontend:
+    build:
+      context: ./frontend
+      args:
+        NEXT_PUBLIC_API_URL: http://localhost:8000
+    ports:
+      - "3000:3000"
+    depends_on:
+      - backend
+
+volumes:
+  vigil-data:

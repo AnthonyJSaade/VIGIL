@@ -11,6 +11,7 @@ from ..config import settings
 from ..db import get_finding, get_findings_by_run, get_run, get_patches_by_finding, get_verdict_by_patch
 from ..models.finding import SeverityLevel
 from ..models.trace import AgentRole, TraceAction
+from ..scanner.source import read_source_lines
 from ..streaming.sse import bus
 from .repos import CURATED_REPOS
 
@@ -82,6 +83,19 @@ async def get_finding_detail(finding_id: str) -> FindingDetail:
     finding = await get_finding(finding_id)
     if finding is None:
         raise HTTPException(status_code=404, detail="Finding not found")
+
+    # Safety net: historical findings may have an empty snippet (LLM path
+    # mismatch) or stale non-code text (Semgrep rule metadata). If we can
+    # resolve the repo on disk, prefer real source lines. We don't persist
+    # the enriched snippet back to the DB — this endpoint stays side-effect-free.
+    run = await get_run(finding.run_id)
+    repo = next((r for r in CURATED_REPOS if r.id == run.repo_id), None) if run else None
+    if repo is not None:
+        repo_path = Path(settings.demo_repos_path) / repo.id
+        real = read_source_lines(repo_path, finding.file_path, finding.start_line, finding.end_line)
+        if real:
+            finding.snippet = real
+
     return _to_detail(finding)
 
 
@@ -89,15 +103,33 @@ async def get_finding_detail(finding_id: str) -> FindingDetail:
 # Patch pipeline (Surgeon-Critic feedback loop)
 # ---------------------------------------------------------------------------
 
-class PatchResult(BaseModel):
-    patch_id: str
+class PatchView(BaseModel):
+    id: str
     finding_id: str
     diff: str
     explanation: str
+    model_used: str
     attempt: int
+    prior_concerns: list[str] | None
+    created_at: str
+
+
+class VerdictView(BaseModel):
+    id: str
+    patch_id: str
     approved: bool
     reasoning: str
     concerns: list[str]
+    model_used: str
+    created_at: str
+
+
+class PatchWithVerdict(BaseModel):
+    """Paired patch + verdict. ``verdict`` is ``null`` while the Critic is still
+    reviewing the patch, so the UI can show a loading state correctly."""
+
+    patch: PatchView
+    verdict: VerdictView | None
 
 
 class PatchTriggerResponse(BaseModel):
@@ -106,10 +138,14 @@ class PatchTriggerResponse(BaseModel):
     message: str
 
 
-async def _run_patch_pipeline(finding_id: str, repo_path: str) -> None:
+async def _run_patch_pipeline(
+    finding_id: str,
+    repo_path: str,
+    starting_attempt: int = 1,
+) -> None:
     """Background task: run the Surgeon-Critic loop for a finding."""
     try:
-        await run_patch_review_loop(finding_id, Path(repo_path))
+        await run_patch_review_loop(finding_id, Path(repo_path), starting_attempt=starting_attempt)
     except Exception as exc:
         log.exception("Patch pipeline failed for finding %s: %s", finding_id, exc)
         finding = await get_finding(finding_id)
@@ -125,17 +161,24 @@ async def _run_patch_pipeline(finding_id: str, repo_path: str) -> None:
 async def trigger_patch(
     finding_id: str,
     background_tasks: BackgroundTasks,
+    force: bool = Query(False, description="Run the Surgeon-Critic loop again even if prior attempts exist"),
 ) -> PatchTriggerResponse:
     finding = await get_finding(finding_id)
     if finding is None:
         raise HTTPException(status_code=404, detail="Finding not found")
 
     existing_patches = await get_patches_by_finding(finding_id)
-    if existing_patches:
+    if existing_patches and not force:
         raise HTTPException(
             status_code=409,
             detail="Patch pipeline already ran for this finding",
         )
+
+    starting_attempt = (
+        max((p.attempt for p in existing_patches), default=0) + 1
+        if existing_patches
+        else 1
+    )
 
     run = await get_run(finding.run_id)
     if run is None:
@@ -149,7 +192,7 @@ async def trigger_patch(
     if not repo_path.exists():
         raise HTTPException(status_code=404, detail="Demo repo directory not found")
 
-    background_tasks.add_task(_run_patch_pipeline, finding_id, str(repo_path))
+    background_tasks.add_task(_run_patch_pipeline, finding_id, str(repo_path), starting_attempt)
 
     return PatchTriggerResponse(
         status="started",
@@ -158,24 +201,38 @@ async def trigger_patch(
     )
 
 
-@router.get("/api/findings/{finding_id}/patches", response_model=list[PatchResult])
-async def list_patches(finding_id: str) -> list[PatchResult]:
+@router.get("/api/findings/{finding_id}/patches", response_model=list[PatchWithVerdict])
+async def list_patches(finding_id: str) -> list[PatchWithVerdict]:
     finding = await get_finding(finding_id)
     if finding is None:
         raise HTTPException(status_code=404, detail="Finding not found")
 
     patches = await get_patches_by_finding(finding_id)
-    results = []
+    results: list[PatchWithVerdict] = []
     for p in patches:
         verdict = await get_verdict_by_patch(p.id)
-        results.append(PatchResult(
-            patch_id=p.id,
+        patch_view = PatchView(
+            id=p.id,
             finding_id=p.finding_id,
             diff=p.diff,
             explanation=p.explanation,
+            model_used=p.model_used,
             attempt=p.attempt,
-            approved=verdict.approved if verdict else False,
-            reasoning=verdict.reasoning if verdict else "Pending review",
-            concerns=verdict.concerns if verdict else [],
-        ))
+            prior_concerns=p.prior_concerns,
+            created_at=p.created_at.isoformat(),
+        )
+        verdict_view = (
+            VerdictView(
+                id=verdict.id,
+                patch_id=verdict.patch_id,
+                approved=verdict.approved,
+                reasoning=verdict.reasoning,
+                concerns=verdict.concerns,
+                model_used=verdict.model_used,
+                created_at=verdict.created_at.isoformat(),
+            )
+            if verdict is not None
+            else None
+        )
+        results.append(PatchWithVerdict(patch=patch_view, verdict=verdict_view))
     return results

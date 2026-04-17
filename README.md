@@ -84,56 +84,52 @@ All agent steps stream to the browser via Server-Sent Events (SSE) so the entire
 ```
 .
 ├── backend/
-│   ├── app/
-│   │   ├── main.py              # FastAPI app, CORS, lifespan
-│   │   ├── config.py            # Settings (env: VIGIL_*)
-│   │   ├── db.py                # SQLite schema + async CRUD
-│   │   ├── models/              # Pydantic schemas
-│   │   │   ├── finding.py       # Finding + SeverityLevel
-│   │   │   ├── patch.py         # PatchProposal
-│   │   │   ├── critic.py        # CriticVerdict
-│   │   │   ├── verification.py  # VerificationReport
-│   │   │   ├── trace.py         # TraceEvent + AgentRole + TraceAction
-│   │   │   └── run.py           # Run + RunStatus
-│   │   ├── scanner/             # Hunter (hybrid pipeline)
-│   │   │   ├── runner.py        # Semgrep CLI wrapper
-│   │   │   ├── normalizer.py    # Semgrep JSON → Finding[]
-│   │   │   ├── llm_reviewer.py  # Claude code review → Finding[]
-│   │   │   └── orchestrator.py  # Two-phase scan + deduplication
-│   │   ├── agents/              # LLM-backed agents
-│   │   │   ├── surgeon.py       # Finding → unified diff
-│   │   │   ├── critic.py        # Diff → verdict
-│   │   │   └── orchestrator.py  # Surgeon-Critic feedback loop
-│   │   ├── verification/
-│   │   │   └── sandbox.py       # Copy repo, apply patch, rerun scanner
-│   │   ├── export/
-│   │   │   ├── bundle.py        # HTML report + ZIP generation
-│   │   │   └── report_template.html
-│   │   ├── streaming/
-│   │   │   └── sse.py           # EventBus (publish/subscribe per run)
-│   │   └── routes/
-│   │       ├── repos.py         # GET /api/repos
-│   │       ├── runs.py          # POST /api/runs, GET /api/runs/{id}
-│   │       ├── findings.py      # Findings CRUD + patch trigger
-│   │       ├── patches.py       # Verification trigger
-│   │       ├── stream.py        # SSE endpoint
-│   │       └── export.py        # HTML/ZIP download
-│   └── requirements.txt
+│   ├── Dockerfile
+│   ├── requirements.txt
+│   └── app/
+│       ├── main.py              # FastAPI app, CORS, lifespan
+│       ├── config.py            # Settings (env: VIGIL_*)
+│       ├── db.py                # SQLite schema + async CRUD
+│       ├── models/              # Pydantic schemas
+│       ├── scanner/             # Hunter (hybrid pipeline)
+│       │   ├── runner.py        # Semgrep CLI wrapper
+│       │   ├── normalizer.py    # Semgrep JSON → Finding[]
+│       │   ├── llm_reviewer.py  # Claude code review → Finding[]
+│       │   └── orchestrator.py  # Two-phase scan + deduplication
+│       ├── agents/              # LLM-backed agents
+│       │   ├── surgeon.py       # Finding → unified diff
+│       │   ├── critic.py        # Diff → verdict
+│       │   └── orchestrator.py  # Surgeon-Critic feedback loop
+│       ├── verification/
+│       │   └── sandbox.py       # Copy repo, apply patch, rerun scanner
+│       ├── export/
+│       │   ├── bundle.py        # HTML report + ZIP generation
+│       │   └── report_template.html
+│       ├── streaming/
+│       │   └── sse.py           # EventBus (publish/subscribe per run)
+│       └── routes/              # API endpoints
 ├── frontend/
-│   ├── src/
-│   │   ├── app/
-│   │   │   ├── page.tsx         # Repo picker (home)
-│   │   │   ├── repo-cards.tsx   # Repo selection + Start Audit
-│   │   │   ├── runs/[run_id]/
-│   │   │   │   └── page.tsx     # Live feed + findings list
-│   │   │   └── findings/[finding_id]/
-│   │   │       └── page.tsx     # Detail + patch + verify
-│   │   └── components/
-│   │       ├── live-feed.tsx    # SSE event stream
-│   │       ├── findings-list.tsx
-│   │       ├── patch-panel.tsx  # Diff viewer + Critic verdict
-│   │       └── severity-badge.tsx
-│   └── package.json
+│   ├── Dockerfile
+│   ├── package.json
+│   ├── app/                     # Next.js App Router pages
+│   │   ├── page.tsx             # Home — repo picker
+│   │   └── audit/[id]/
+│   │       ├── page.tsx         # Audit — SSE timeline + findings
+│   │       ├── finding/[findingId]/
+│   │       │   └── page.tsx     # Finding detail + patch pipeline
+│   │       └── patch-all/
+│   │           └── page.tsx     # Batch patch all findings
+│   ├── components/
+│   │   ├── ui/                  # shadcn/ui components
+│   │   └── vigil/               # Vigil-specific components
+│   └── lib/
+│       ├── api.ts               # Typed fetch wrappers (snake→camel)
+│       └── utils.ts             # cn() utility
+├── demo-repos/
+│   └── vibe-todo-app/           # Intentionally vulnerable Express.js app
+│       └── server.js            # 9 vulns (5 Semgrep + 4 LLM-only)
+├── docker-compose.yml
+├── .env.example
 ├── AGENTS.md                    # Project charter + agent rules
 ├── PLAN.md                      # Full implementation plan
 └── CONTEXT.md                   # Build context for session continuity
@@ -141,14 +137,29 @@ All agent steps stream to the browser via Server-Sent Events (SSE) so the entire
 
 ## Getting Started
 
-### Prerequisites
+### Quick Start with Docker
+
+```bash
+cp .env.example .env
+# Edit .env and add your Anthropic API key
+
+docker compose up --build
+```
+
+- Frontend: `http://localhost:3000`
+- Backend API: `http://localhost:8000`
+- API docs: `http://localhost:8000/docs`
+
+### Local Development
+
+#### Prerequisites
 
 - Python 3.11+
 - Node.js 18+
-- [Semgrep](https://semgrep.dev/docs/getting-started/) (`pip install semgrep` or `brew install semgrep`)
+- [Semgrep](https://semgrep.dev/docs/getting-started/) (`pip install semgrep`)
 - An [Anthropic API key](https://console.anthropic.com/)
 
-### Backend
+#### Backend
 
 ```bash
 cd backend
@@ -163,7 +174,7 @@ uvicorn app.main:app --reload --port 8000
 
 The API will be available at `http://localhost:8000`. Interactive docs at `/docs`.
 
-### Frontend
+#### Frontend
 
 ```bash
 cd frontend
@@ -172,6 +183,13 @@ npm run dev
 ```
 
 The UI will be available at `http://localhost:3000`.
+
+### Demo Repository
+
+The project ships with `demo-repos/vibe-todo-app/` — a deliberately vulnerable Express.js todo API designed to showcase both scanning phases:
+
+- **Semgrep detects** (confidence 1.0): SQL injection, hardcoded JWT secret, eval(), permissive CORS, path traversal
+- **LLM review detects** (confidence 0.6-0.8): missing rate limiting, no input validation, logging passwords, error stack leakage
 
 ### Environment Variables
 

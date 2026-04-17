@@ -351,6 +351,13 @@ async def get_verification_by_patch(patch_id: str) -> VerificationReport | None:
         )
 
 
+async def delete_verification_by_patch(patch_id: str) -> None:
+    """Remove any stored verification report for *patch_id* (used for re-runs)."""
+    async with get_db() as db:
+        await db.execute("DELETE FROM verifications WHERE patch_id = ?", (patch_id,))
+        await db.commit()
+
+
 # ---------------------------------------------------------------------------
 # Trace Events
 # ---------------------------------------------------------------------------

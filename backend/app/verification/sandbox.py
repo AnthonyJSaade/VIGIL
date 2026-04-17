@@ -22,30 +22,48 @@ from ..scanner.normalizer import normalize_findings
 log = logging.getLogger(__name__)
 
 
-async def _apply_diff(sandbox_path: Path, diff: str) -> bool:
-    """Apply a unified diff inside the sandbox using ``patch``.
+async def _run_patch(sandbox_path: Path, diff: str, strip: int) -> tuple[int, str]:
+    """Invoke ``patch -p<strip> --no-backup-if-mismatch -F 3`` inside *sandbox_path*.
 
-    Returns True if the patch applied cleanly, False otherwise.
+    Returns ``(returncode, combined_output)`` where the output merges stdout and
+    stderr so the caller can surface the real `patch` diagnostics.
     """
     proc = await asyncio.create_subprocess_exec(
-        "patch", "-p1", "--no-backup-if-mismatch",
+        "patch", f"-p{strip}", "--no-backup-if-mismatch", "-F", "3",
         stdin=asyncio.subprocess.PIPE,
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
         cwd=str(sandbox_path),
     )
     stdout, stderr = await proc.communicate(input=diff.encode())
+    combined = (stdout.decode(errors="replace") + stderr.decode(errors="replace")).strip()
+    return proc.returncode or 0, combined
 
-    if proc.returncode != 0:
-        log.warning(
-            "patch failed (exit %d): %s",
-            proc.returncode,
-            stderr.decode(errors="replace").strip(),
-        )
-        return False
 
-    log.info("Patch applied cleanly: %s", stdout.decode(errors="replace").strip())
-    return True
+async def _apply_diff(sandbox_path: Path, diff: str) -> tuple[bool, str]:
+    """Apply a unified diff inside the sandbox using ``patch`` with fuzz.
+
+    Tries ``-p1`` first (standard ``a/path`` ``b/path`` layout) and falls back
+    to ``-p0`` when the LLM omitted the ``a/ b/`` prefix. Returns
+    ``(applied, diagnostics)`` — ``diagnostics`` is empty on success and
+    contains the combined stdout/stderr on failure so it can be shown in the
+    verification report.
+    """
+    rc, out = await _run_patch(sandbox_path, diff, strip=1)
+    if rc == 0:
+        log.info("Patch applied cleanly with -p1: %s", out)
+        return True, ""
+
+    log.warning("patch -p1 failed (exit %d): %s", rc, out)
+
+    rc0, out0 = await _run_patch(sandbox_path, diff, strip=0)
+    if rc0 == 0:
+        log.info("Patch applied cleanly with -p0 fallback: %s", out0)
+        return True, ""
+
+    log.warning("patch -p0 fallback also failed (exit %d): %s", rc0, out0)
+    combined = f"-p1 attempt:\n{out}\n\n-p0 attempt:\n{out0}".strip()
+    return False, combined
 
 
 def _finding_still_present(
@@ -85,14 +103,17 @@ async def verify_patch(
         shutil.copytree(repo_path, sandbox_repo)
         log.info("Sandbox created at %s", sandbox_repo)
 
-        patch_applied = await _apply_diff(sandbox_repo, patch.diff)
+        patch_applied, patch_stderr = await _apply_diff(sandbox_repo, patch.diff)
         if not patch_applied:
+            details = "Patch failed to apply cleanly to the sandbox copy."
+            if patch_stderr:
+                details = f"{details}\n\n{patch_stderr}"
             return VerificationReport(
                 id=str(uuid.uuid4()),
                 patch_id=patch.id,
                 scanner_rerun_clean=False,
                 tests_passed=None,
-                details="Patch failed to apply cleanly to the sandbox copy.",
+                details=details,
             )
 
         try:

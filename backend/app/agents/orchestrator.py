@@ -33,6 +33,7 @@ async def _read_source_from_repo(finding: Finding, repo_path: Path) -> str:
 async def run_patch_review_loop(
     finding_id: str,
     repo_path: Path,
+    starting_attempt: int = 1,
 ) -> tuple[PatchProposal, CriticVerdict]:
     """Execute the Surgeon -> Critic feedback loop.
 
@@ -40,6 +41,9 @@ async def run_patch_review_loop(
     2. Critic reviews the patch independently.
     3. If rejected and attempts remain, Surgeon retries with Critic's concerns.
     4. Returns the final (patch, verdict) pair.
+
+    ``starting_attempt`` lets a user-triggered retry continue the numbering from
+    previously stored attempts instead of resetting to 1.
 
     Publishes SSE events at each step for real-time UI updates.
 
@@ -58,7 +62,8 @@ async def run_patch_review_loop(
     patch: PatchProposal | None = None
     verdict: CriticVerdict | None = None
 
-    for attempt in range(1, MAX_ATTEMPTS + 1):
+    last_attempt = starting_attempt + MAX_ATTEMPTS - 1
+    for attempt in range(starting_attempt, last_attempt + 1):
         # ── Surgeon proposes ────────────────────────────────────────
         await bus.publish(run_id, AgentRole.SURGEON, TraceAction.PATCH_PROPOSED, {
             "finding_id": finding_id,
@@ -103,7 +108,7 @@ async def run_patch_review_loop(
             "concerns": verdict.concerns,
         })
 
-        if attempt < MAX_ATTEMPTS:
+        if attempt < last_attempt:
             prior_concerns = verdict.concerns
             await bus.publish(run_id, AgentRole.SURGEON, TraceAction.PATCH_RETRIED, {
                 "finding_id": finding_id,

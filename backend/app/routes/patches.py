@@ -3,11 +3,12 @@
 import logging
 from pathlib import Path
 
-from fastapi import APIRouter, BackgroundTasks, HTTPException
+from fastapi import APIRouter, BackgroundTasks, HTTPException, Query
 from pydantic import BaseModel
 
 from ..config import settings
 from ..db import (
+    delete_verification_by_patch,
     get_finding,
     get_patch,
     get_run,
@@ -80,6 +81,7 @@ async def _run_verification(patch_id: str, repo_path: str) -> None:
 async def trigger_verification(
     patch_id: str,
     background_tasks: BackgroundTasks,
+    force: bool = Query(False, description="Re-run verification even if a prior report exists"),
 ) -> VerifyTriggerResponse:
     patch = await get_patch(patch_id)
     if patch is None:
@@ -94,10 +96,12 @@ async def trigger_verification(
 
     existing = await get_verification_by_patch(patch_id)
     if existing is not None:
-        raise HTTPException(
-            status_code=409,
-            detail="Verification already ran for this patch",
-        )
+        if not force:
+            raise HTTPException(
+                status_code=409,
+                detail="Verification already ran for this patch",
+            )
+        await delete_verification_by_patch(patch_id)
 
     finding = await get_finding(patch.finding_id)
     if finding is None:

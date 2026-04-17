@@ -14,6 +14,7 @@ import anthropic
 
 from ..config import settings
 from ..models.finding import Finding, SeverityLevel
+from .source import read_source_lines
 
 log = logging.getLogger(__name__)
 
@@ -175,7 +176,7 @@ async def review_code(
     try:
         client = anthropic.AsyncAnthropic(api_key=settings.anthropic_api_key)
         response = await client.messages.create(
-            model="claude-sonnet-4-20250514",
+            model="claude-opus-4-7",
             max_tokens=4096,
             system=_SYSTEM_PROMPT,
             messages=[{"role": "user", "content": user_prompt}],
@@ -188,11 +189,9 @@ async def review_code(
     findings = _parse_response(raw_text, run_id)
 
     for f in findings:
-        if not f.snippet and f.file_path in files:
-            lines = files[f.file_path].splitlines()
-            start = max(0, f.start_line - 1)
-            end = min(len(lines), f.end_line)
-            f.snippet = "\n".join(lines[start:end])
+        real = read_source_lines(repo_path, f.file_path, f.start_line, f.end_line)
+        if real:
+            f.snippet = real
 
     log.info("LLM review found %d additional findings", len(findings))
     return findings

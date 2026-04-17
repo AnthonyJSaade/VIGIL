@@ -4,10 +4,10 @@
 > Updated after each significant change.
 
 ## Last Updated
-2026-04-14
+2026-04-16
 
 ## Current Phase
-**Phase 9 complete + post-review fixes** — Full Next.js UI wired to all backend endpoints. Repo picker → Start Audit → live SSE feed → findings list → finding detail with code snippet → patch request + Critic verdict → sandbox verification → export download. Post-review sweep fixed SSE delivery bug, patch polling race condition, missing error handling, and React lint warnings. Ready for Phase 10 (demo repo + Docker).
+**Phase 10 complete — MVP fully operational.** Demo repo created (`demo-repos/vibe-todo-app/`), semgrep installed, end-to-end smoke test passed (8 Semgrep findings detected). Docker setup added (backend Dockerfile, frontend Dockerfile, docker-compose.yml). All 10 phases of the build plan are complete.
 
 ## What Exists
 
@@ -49,22 +49,40 @@
 | `backend/app/export/report_template.html` | Jinja2 template — self-contained HTML with embedded CSS, dark theme, agent color-coding (hunter=teal, surgeon=amber, critic=purple, verifier=green), diff syntax highlighting, trace timeline. Print-friendly. |
 | `backend/app/export/bundle.py` | `generate_html_report(run_id) -> str` and `generate_zip_bundle(run_id) -> bytes`. Collects all run data (findings, patches, verdicts, verifications, trace events), renders template. ZIP includes report.html + findings.json + trace.json + individual diffs and verdicts. |
 | `backend/app/routes/export.py` | `GET /api/runs/{run_id}/export?format=html|zip` — downloads self-contained HTML report or ZIP bundle. Content-Disposition attachment headers. 404 if run not found. |
-| `frontend/package.json` | Next.js 16 (App Router), React 19, TypeScript, Tailwind CSS v4 (`@tailwindcss/postcss`), ESLint (`eslint-config-next`) |
+| `frontend/package.json` | Next.js 16, React 19, TypeScript, Tailwind v4, shadcn/ui (Radix + lucide-react + tailwind-merge + clsx + class-variance-authority) |
 | `frontend/next.config.ts` | Default Next config scaffold |
-| `frontend/src/app/layout.tsx` | Root layout: Geist / Geist Mono fonts, `globals.css`, metadata set to "VIGIL — DevSecOps Gatekeeper" |
-| `frontend/src/app/globals.css` | Tailwind v4 entry (`@import "tailwindcss"`) |
-| `frontend/src/app/page.tsx` | Home (async server component): `fetch("http://localhost:8000/api/repos", { cache: "no-store" })`, maps JSON to `Repo[]`, renders `RepoCards` |
-| `frontend/src/app/repo-cards.tsx` | Client component: responsive repo card grid, selection toggle, "Start Audit" button calls `POST /api/runs` and navigates to `/runs/{id}` |
-| `frontend/src/app/runs/[run_id]/page.tsx` | Run page: fetches run status, renders `LiveFeed` (SSE), `FindingsList` on completion, export download links |
-| `frontend/src/app/findings/[finding_id]/page.tsx` | Finding detail: severity badge, code snippet with line numbers, confidence %, `PatchPanel` for Surgeon-Critic flow |
-| `frontend/src/components/live-feed.tsx` | SSE client via `EventSource`: connects to `/api/runs/{id}/stream`, renders scrolling agent event log with role colors |
-| `frontend/src/components/findings-list.tsx` | Filterable findings grid (by severity), links each finding to its detail page |
-| `frontend/src/components/severity-badge.tsx` | Colored severity pill (error=red, warning=yellow, info=blue) |
-| `frontend/src/components/patch-panel.tsx` | Patch request button, polls for results, renders unified diff (color-coded), Critic verdict, "Verify in Sandbox" button, verification result display |
+| `frontend/tsconfig.json` | `@/*` alias points to `./*` (root, not `src/`) |
+| `frontend/app/layout.tsx` | Root layout: Inter + JetBrains Mono fonts, dark theme globals, VIGIL metadata |
+| `frontend/app/globals.css` | Tailwind v4 + CSS variables for dark theme, agent colors, severity colors |
+| `frontend/app/page.tsx` | Home page: fetches repos from API, repo card grid with selection, Start Audit button (POST /api/runs, navigates to /audit/{id}), non-functional Clone/Upload UI |
+| `frontend/app/audit/[id]/page.tsx` | Audit page: SSE via EventSource for live AgentTimeline, stat cards, FindingsTable on completion, correct HTML/ZIP export links, Patch All button |
+| `frontend/app/audit/[id]/finding/[findingId]/page.tsx` | Finding detail: real fetch, severity badge, CodeBlock with highlight, ConfidenceBar, PatchPipeline |
+| `frontend/app/audit/[id]/patch-all/page.tsx` | Batch patch: sequential Surgeon→Critic→Verifier for all findings, progress bar, per-finding status |
+| `frontend/lib/api.ts` | Typed fetch wrappers (fetchRepos, createRun, fetchRun, fetchFindings, fetchFinding, requestPatch, fetchPatches, requestVerify, fetchVerification, sseUrl, exportUrl). Maps snake_case backend → camelCase frontend. Confidence: 0-1 → 0-100. |
+| `frontend/lib/utils.ts` | `cn()` utility for Tailwind class merging |
+| `frontend/components/ui/*` | shadcn/ui component library (Button, Card, Table, Badge, Input, Tabs, etc.) |
+| `frontend/components/vigil/agent-card.tsx` | Agent-branded card with icon, name, color (hunter=cyan, surgeon=amber, critic=violet, verifier=green) |
+| `frontend/components/vigil/agent-timeline.tsx` | Chronological agent event list with role-specific styling, vertical timeline |
+| `frontend/components/vigil/code-block.tsx` | CodeBlock (line numbers + highlight), DiffBlock (unified diff coloring), SideBySideDiff |
+| `frontend/components/vigil/confidence-bar.tsx` | Visual bar 0-100% with color gradient |
+| `frontend/components/vigil/findings-table.tsx` | Clickable findings table: severity, rule, file, line, scanner badge, confidence bar |
+| `frontend/components/vigil/patch-pipeline.tsx` | Full Surgeon→Critic→Verifier flow: request patch, poll for results, show diff/verdict, verify in sandbox, polling-based |
+| `frontend/components/vigil/repo-card.tsx` | Repository card with language dot and description |
+| `frontend/components/vigil/severity-badge.tsx` | Colored severity pill with icon (error=red, warning=amber, info=blue) |
+| `frontend/components/vigil/stat-card.tsx` | Stat card with icon and variant coloring |
+| `frontend/components/vigil/status-badge.tsx` | Audit status badge with pulse animation |
+| `frontend/next.config.ts` | Next.js config with standalone output for Docker |
+| `demo-repos/vibe-todo-app/server.js` | ~160-line Express.js todo API with 9 intentional vulnerabilities (5 Semgrep-detectable, 4 LLM-only) |
+| `demo-repos/vibe-todo-app/package.json` | Dependencies: express, cors, better-sqlite3, jsonwebtoken, multer |
+| `demo-repos/vibe-todo-app/README.md` | "Built with AI assistance for CS 101 final project" |
+| `demo-repos/vibe-todo-app/.semgrepignore` | Ignores node_modules/ |
+| `backend/Dockerfile` | Python 3.12-slim, installs semgrep + pip deps, runs uvicorn |
+| `frontend/Dockerfile` | Node 22-alpine multi-stage build (builder + runner), standalone output |
+| `docker-compose.yml` | Two services: backend (8000) + frontend (3000), demo-repos volume mount |
+| `.env.example` | Template for VIGIL_ANTHROPIC_API_KEY |
 
 ## What Does NOT Exist Yet
-- No demo repo (Phase 10)
-- No Docker setup (Phase 10)
+- All planned phases are complete. Remaining work is testing, polish, and presentation prep.
 
 ## Tech Stack Decisions (Locked)
 
@@ -164,3 +182,5 @@ All backend API endpoints are now implemented.
 | 2026-04-13 | Phase 9 kickoff: scaffolded Next.js app under `frontend/` (TypeScript, Tailwind v4, App Router). Home at `src/app/page.tsx` fetches curated repos from `http://localhost:8000/api/repos` (no-store). `repo-cards.tsx` client grid for selecting a repo (local selection state only; not wired to `POST /api/runs` yet). |
 | 2026-04-13 | Phase 9 complete: Full MVP UI built. (1) "Start Audit" button in `repo-cards.tsx` calls `POST /api/runs` and navigates to run page. (2) `/runs/[run_id]` page with SSE live feed (`EventSource`), findings list on completion, export buttons. (3) `/findings/[finding_id]` page with code snippet, confidence score, patch request + diff viewer, Critic verdict panel, sandbox verification trigger and result. (4) Shared components: `live-feed.tsx`, `findings-list.tsx`, `severity-badge.tsx`, `patch-panel.tsx`. (5) Layout metadata updated. Build passes cleanly (TypeScript + Next.js). |
 | 2026-04-14 | Post-review bug fixes: (1) **SSE delivery fix** — removed named `event:` field from SSE frames in `backend/app/streaming/sse.py` so `EventSource.onmessage` receives events (action is already in the JSON payload). (2) **Patch polling race fix** — `patch-panel.tsx` now keeps polling until a patch is approved or all 2 attempts are exhausted, instead of stopping at the first result (which hid the Critic retry). (3) **Home page error handling** — `page.tsx` catches backend-down errors and shows a fallback message instead of crashing. (4) **React lint fix** — wrapped `fetchRun` in `useCallback` in `runs/[run_id]/page.tsx` so dependency arrays are correct. (5) **Poll resilience** — `loadPatches` now catches network errors instead of throwing uncaught rejections every 2 s. (6) **Comment style alignment** — added JSDoc to complex functions in `patch-panel.tsx` and fixed header comment format in `severity-badge.tsx` to match backend docstring conventions. Build passes cleanly. |
+| 2026-04-16 | Phase 9 v2: Replaced entire frontend with v0-designed UI. Deleted old `frontend/src/` scaffold. Copied v0 components (shadcn/ui + 10 Vigil-specific). Created `lib/api.ts` typed API layer (snake_case→camelCase, confidence 0-1→0-100). Rewrote all pages: Home (repo fetch + non-functional clone/upload), Audit (SSE AgentTimeline + stat cards + FindingsTable + correct export links), Finding detail (real API fetch + CodeBlock + PatchPipeline), Patch All (batch sequential processing). Updated tsconfig `@/*` alias from `./src/*` to `./*`. Removed unused `form.tsx` shadcn component. `next build` passes cleanly. |
+| 2026-04-16 | Phase 10 complete: (1) Created `demo-repos/vibe-todo-app/` — ~160-line Express.js todo API with 9 intentional vulnerabilities split between Semgrep (SQL injection, hardcoded JWT, eval, CORS, path traversal) and LLM-only (missing rate limiting, no input validation, logging passwords, error stack leakage). (2) Added semgrep to `backend/requirements.txt`, installed v1.159.0. (3) Smoke-tested: `POST /api/runs` → scan completed → 8 Semgrep findings detected correctly. (4) Docker setup: backend Dockerfile (Python 3.12-slim + semgrep + patch), frontend Dockerfile (Node 22-alpine multi-stage with standalone output), `docker-compose.yml` (two services + demo-repos volume), `.env.example`. (5) Enabled `output: "standalone"` in `next.config.ts`. All 10 phases of the build plan are now complete. |

@@ -1,8 +1,10 @@
 """Deterministic normalizer — converts raw Semgrep JSON into typed Finding objects."""
 
 import uuid
+from pathlib import Path
 
 from ..models.finding import Finding, SeverityLevel
+from .source import read_source_lines
 
 # Semgrep outputs severity in UPPERCASE; map to our enum.
 _SEVERITY_MAP: dict[str, SeverityLevel] = {
@@ -22,16 +24,34 @@ def _map_severity(raw: str) -> SeverityLevel:
     return _SEVERITY_MAP.get(raw.upper(), SeverityLevel.INFO)
 
 
-def normalize_findings(raw: dict, run_id: str) -> list[Finding]:
+def normalize_findings(
+    raw: dict,
+    run_id: str,
+    repo_path: Path | None = None,
+) -> list[Finding]:
     """Convert Semgrep JSON output into a list of :class:`Finding` objects.
 
     This function is fully deterministic — no LLM calls, no network access.
     Each Semgrep ``cli_match`` in ``raw["results"]`` becomes one Finding.
+
+    When ``repo_path`` is provided, the snippet is pulled from the real source
+    file at the matched line range. Semgrep's ``extra.lines`` is kept only as a
+    last-resort fallback because some rules fill it with metadata text rather
+    than the source code.
     """
     findings: list[Finding] = []
 
     for match in raw.get("results", []):
         extra = match.get("extra", {})
+        file_path = match.get("path", "")
+        start_line = match.get("start", {}).get("line", 0)
+        end_line = match.get("end", {}).get("line", 0)
+
+        real_snippet = ""
+        if repo_path is not None:
+            real_snippet = read_source_lines(repo_path, file_path, start_line, end_line)
+
+        snippet = real_snippet or extra.get("lines", "")
 
         finding = Finding(
             id=str(uuid.uuid4()),
@@ -40,10 +60,10 @@ def normalize_findings(raw: dict, run_id: str) -> list[Finding]:
             rule_id=match.get("check_id", "unknown"),
             severity=_map_severity(extra.get("severity", "INFO")),
             message=extra.get("message", ""),
-            file_path=match.get("path", ""),
-            start_line=match.get("start", {}).get("line", 0),
-            end_line=match.get("end", {}).get("line", 0),
-            snippet=extra.get("lines", ""),
+            file_path=file_path,
+            start_line=start_line,
+            end_line=end_line,
+            snippet=snippet,
             metadata=extra.get("metadata", {}),
         )
         findings.append(finding)
