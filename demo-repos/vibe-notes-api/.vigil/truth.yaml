@@ -1,0 +1,83 @@
+repo: vibe-notes-api
+description: Flask notes service with common AI-generated security antipatterns
+findings:
+  - id: hardcoded-secret-key
+    cwe: CWE-798
+    kind: hardcoded-secret
+    file: app.py
+    line: 23
+    severity: high
+    detectable_by: [semgrep, llm]
+    notes: Flask SECRET_KEY is a hardcoded string literal
+
+  - id: sqli-search
+    cwe: CWE-89
+    kind: sql-injection
+    file: app.py
+    line: 61
+    severity: critical
+    detectable_by: [semgrep, llm]
+    notes: f-string query in /search builds WHERE title LIKE from user input
+
+  - id: weak-hash-passwords
+    cwe: CWE-327
+    kind: weak-crypto
+    file: app.py
+    lines: [71, 86]
+    severity: high
+    detectable_by: [semgrep, llm]
+    notes: hashlib.md5 used to hash user passwords in /register and /login
+
+  - id: no-rate-limit-login
+    cwe: CWE-307
+    kind: missing-rate-limit
+    file: app.py
+    line: 82
+    severity: medium
+    detectable_by: [llm]
+    notes: /login has no throttling; enables credential stuffing
+
+  - id: insecure-deserialization
+    cwe: CWE-502
+    kind: insecure-deserialization
+    file: app.py
+    line: 102
+    severity: critical
+    detectable_by: [semgrep, llm]
+    notes: pickle.loads on client-supplied body in /notes/import
+
+  - id: ssrf-fetch
+    cwe: CWE-918
+    kind: ssrf
+    file: app.py
+    line: 117
+    severity: high
+    detectable_by: [semgrep, llm]
+    notes: /notes/fetch issues requests.get on an unvalidated user-supplied URL
+
+  - id: xss-note-render
+    cwe: CWE-79
+    kind: stored-xss
+    file: app.py
+    line: 130
+    severity: high
+    detectable_by: [semgrep, llm]
+    notes: Markup() wraps raw note content and template uses |safe, bypassing escaping
+
+  - id: open-redirect
+    cwe: CWE-601
+    kind: open-redirect
+    file: app.py
+    line: 137
+    severity: medium
+    detectable_by: [semgrep, llm]
+    notes: /go redirects to an arbitrary user-supplied next parameter
+
+  - id: debug-mode-on
+    cwe: CWE-489
+    kind: debug-enabled
+    file: app.py
+    line: 142
+    severity: high
+    detectable_by: [semgrep, llm]
+    notes: Flask app.run called with debug=True (Werkzeug debugger is RCE-capable)

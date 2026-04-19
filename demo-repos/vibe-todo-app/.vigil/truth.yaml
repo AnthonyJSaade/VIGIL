@@ -1,0 +1,101 @@
+repo: vibe-todo-app
+description: Express todo API with common AI-generated security antipatterns
+findings:
+  - id: cors-wildcard
+    cwe: CWE-942
+    kind: permissive-cors
+    file: server.js
+    line: 15
+    severity: medium
+    detectable_by: [llm]
+    notes: cors({ origin "*" }) allows any origin (semgrep auto-config does not flag)
+
+  - id: hardcoded-jwt-secret
+    cwe: CWE-798
+    kind: hardcoded-secret
+    file: server.js
+    line: 36
+    severity: high
+    detectable_by: [semgrep, llm]
+    notes: JWT_SECRET is a hardcoded string literal
+
+  - id: no-input-validation-register
+    cwe: CWE-20
+    kind: missing-validation
+    file: server.js
+    line: 49
+    severity: low
+    detectable_by: [llm]
+    notes: /register accepts username/password with no length/type/shape validation
+
+  - id: logging-sensitive-data
+    cwe: CWE-532
+    kind: sensitive-logging
+    file: server.js
+    lines: [53, 69]
+    severity: medium
+    detectable_by: [llm]
+    notes: Plaintext passwords logged in /register and /login
+
+  - id: sqli-register
+    cwe: CWE-89
+    kind: sql-injection
+    file: server.js
+    line: 57
+    severity: critical
+    detectable_by: [llm]
+    notes: Template literal SQL with user input in INSERT INTO users; hidden inside better-sqlite3 prepare() so semgrep JS/nodejs/owasp rulesets miss it
+
+  - id: no-rate-limit-login
+    cwe: CWE-307
+    kind: missing-rate-limit
+    file: server.js
+    line: 65
+    severity: medium
+    detectable_by: [llm]
+    notes: /login has no throttling; enables credential brute force
+
+  - id: sqli-login
+    cwe: CWE-89
+    kind: sql-injection
+    file: server.js
+    line: 72
+    severity: critical
+    detectable_by: [llm]
+    notes: Template literal SQL with username/password in SELECT for /login; better-sqlite3 prepare() wrapper defeats semgrep SQLi rules
+
+  - id: sqli-todos
+    cwe: CWE-89
+    kind: sql-injection
+    file: server.js
+    lines: [105, 116, 126]
+    severity: critical
+    detectable_by: [llm]
+    notes: Template literal SQL in /todos SELECT, INSERT, and DELETE handlers; hidden inside better-sqlite3 prepare() so semgrep misses
+
+  - id: eval-rce
+    cwe: CWE-95
+    kind: code-injection
+    file: server.js
+    line: 143
+    severity: critical
+    detectable_by: [semgrep, llm]
+    notes: eval(req.body.expression) in /todos/filter for dynamic filter expressions
+
+  - id: path-traversal-files
+    cwe: CWE-22
+    kind: path-traversal
+    file: server.js
+    line: 153
+    severity: high
+    detectable_by: [semgrep, llm]
+    notes: path.join with unsanitized req.params.filename in /files/:filename
+
+  - id: error-stack-leak
+    cwe: CWE-209
+    kind: info-disclosure
+    file: server.js
+    line: 163
+    severity: low
+    detectable_by: [llm]
+    notes: Global error handler returns err.stack in response body

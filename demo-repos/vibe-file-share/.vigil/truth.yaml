@@ -1,0 +1,83 @@
+repo: vibe-file-share
+description: Express file-sharing service with common AI-generated security antipatterns
+findings:
+  - id: hardcoded-admin-key
+    cwe: CWE-798
+    kind: hardcoded-secret
+    file: server.js
+    line: 15
+    severity: high
+    detectable_by: [llm]
+    notes: ADMIN_API_KEY is a hardcoded string literal; semgrep auto does not flag generic non-high-entropy admin keys
+
+  - id: insecure-random-slug
+    cwe: CWE-338
+    kind: weak-random
+    file: server.js
+    line: 27
+    severity: medium
+    detectable_by: [llm]
+    notes: Math.random used to generate share-link slugs (predictable); semgrep auto does not flag Math.random in this context
+
+  - id: unrestricted-upload
+    cwe: CWE-434
+    kind: unrestricted-upload
+    file: server.js
+    line: 30
+    severity: high
+    detectable_by: [llm]
+    notes: /upload accepts any file type with no MIME/extension whitelist or size cap beyond multer defaults
+
+  - id: no-auth-download
+    cwe: CWE-284
+    kind: missing-auth
+    file: server.js
+    line: 39
+    severity: medium
+    detectable_by: [llm]
+    notes: /download/:name has no authentication or share-link check
+
+  - id: path-traversal-download
+    cwe: CWE-22
+    kind: path-traversal
+    file: server.js
+    line: 40
+    severity: critical
+    detectable_by: [semgrep, llm]
+    notes: path.join with unsanitized req.params.name allows ../ traversal
+
+  - id: command-injection-thumbnail
+    cwe: CWE-78
+    kind: command-injection
+    file: server.js
+    line: 46
+    severity: critical
+    detectable_by: [semgrep, llm]
+    notes: exec uses a template literal with req.query.file interpolated into a shell command
+
+  - id: ssrf-mirror
+    cwe: CWE-918
+    kind: ssrf
+    file: server.js
+    line: 55
+    severity: high
+    detectable_by: [llm]
+    notes: /mirror fetches an arbitrary user-supplied URL with no allowlist or host check
+
+  - id: verbose-error-leak
+    cwe: CWE-209
+    kind: info-disclosure
+    file: server.js
+    lines: [59, 83]
+    severity: low
+    detectable_by: [llm]
+    notes: err.stack is returned in the response body from /mirror and the global error handler
+
+  - id: open-redirect
+    cwe: CWE-601
+    kind: open-redirect
+    file: server.js
+    line: 64
+    severity: medium
+    detectable_by: [semgrep, llm]
+    notes: /go redirects to an arbitrary user-supplied next parameter

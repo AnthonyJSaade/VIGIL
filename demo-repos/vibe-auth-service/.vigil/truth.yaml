@@ -1,0 +1,83 @@
+repo: vibe-auth-service
+description: Express auth microservice with common AI-generated security antipatterns
+findings:
+  - id: hardcoded-jwt-secret
+    cwe: CWE-798
+    kind: hardcoded-secret
+    file: server.js
+    line: 16
+    severity: high
+    detectable_by: [semgrep, llm]
+    notes: JWT_SECRET is a hardcoded string literal
+
+  - id: weak-hash-passwords
+    cwe: CWE-327
+    kind: weak-crypto
+    file: server.js
+    line: 31
+    severity: high
+    detectable_by: [semgrep, llm]
+    notes: crypto.createHash("md5") used to hash passwords
+
+  - id: no-rate-limit-login
+    cwe: CWE-307
+    kind: missing-rate-limit
+    file: server.js
+    line: 41
+    severity: medium
+    detectable_by: [llm]
+    notes: /login has no throttling; enables brute force
+
+  - id: sqli-login
+    cwe: CWE-89
+    kind: sql-injection
+    file: server.js
+    line: 43
+    severity: critical
+    detectable_by: [llm]
+    notes: Template literal SQL string with req.body.username in /login; hidden inside better-sqlite3 prepare() so semgrep SQLi rules miss it
+
+  - id: timing-unsafe-compare
+    cwe: CWE-208
+    kind: timing-attack
+    file: server.js
+    line: 47
+    severity: medium
+    detectable_by: [llm]
+    notes: Password hash compared with === instead of crypto.timingSafeEqual
+
+  - id: session-fixation
+    cwe: CWE-384
+    kind: session-fixation
+    file: server.js
+    line: 48
+    severity: high
+    detectable_by: [llm]
+    notes: /login accepts a client-supplied sessionId query param and reuses it
+
+  - id: insecure-cookie-flags
+    cwe: CWE-614
+    kind: insecure-cookie
+    file: server.js
+    line: 50
+    severity: medium
+    detectable_by: [llm]
+    notes: res.cookie for session sets no HttpOnly, Secure, or SameSite flags
+
+  - id: jwt-decode-no-verify
+    cwe: CWE-347
+    kind: missing-signature-verify
+    file: server.js
+    line: 62
+    severity: critical
+    detectable_by: [semgrep, llm]
+    notes: /me uses jwt.decode which does NOT verify signature; must use jwt.verify
+
+  - id: insecure-random-reset-token
+    cwe: CWE-338
+    kind: weak-random
+    file: server.js
+    line: 69
+    severity: high
+    detectable_by: [llm]
+    notes: Password reset token built from Math.random (predictable); semgrep auto does not flag Math.random in this context
