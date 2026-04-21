@@ -21,6 +21,12 @@ from ..scanner.normalizer import normalize_findings
 
 log = logging.getLogger(__name__)
 
+# Safety net mirroring ``run_semgrep``'s timeout pattern. ``--batch`` should
+# make ``patch`` exit immediately on any ambiguity, but a bounded wait keeps
+# the background verification task deterministic even if the subprocess
+# misbehaves for any other reason.
+PATCH_TIMEOUT_SECONDS = 30
+
 
 class PatchApplyError(Exception):
     """Raised when a unified diff cannot be applied cleanly to a sandbox copy."""
@@ -104,19 +110,45 @@ async def apply_patch_in_temp(
 
 
 async def _run_patch(sandbox_path: Path, diff: str, strip: int) -> tuple[int, str]:
-    """Invoke ``patch -p<strip> --no-backup-if-mismatch -F 3`` inside *sandbox_path*.
+    """Invoke ``patch`` inside *sandbox_path* non-interactively.
 
-    Returns ``(returncode, combined_output)`` where the output merges stdout and
-    stderr so the caller can surface the real `patch` diagnostics.
+    ``--batch`` makes ``patch`` non-interactive: on any ambiguity (missing
+    target file, malformed hunk, reversed patch) it exits non-zero instead of
+    prompting on ``/dev/tty`` and hanging the background verification task.
+    The surrounding ``asyncio.wait_for`` is a belt-and-suspenders timeout
+    mirroring the one in :func:`run_semgrep`.
+
+    Returns ``(returncode, combined_output)`` where the output merges stdout
+    and stderr so the caller can surface the real ``patch`` diagnostics.
     """
     proc = await asyncio.create_subprocess_exec(
-        "patch", f"-p{strip}", "--no-backup-if-mismatch", "-F", "3",
+        "patch", f"-p{strip}", "--batch", "--no-backup-if-mismatch", "-F", "3",
         stdin=asyncio.subprocess.PIPE,
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
         cwd=str(sandbox_path),
     )
-    stdout, stderr = await proc.communicate(input=diff.encode())
+    try:
+        stdout, stderr = await asyncio.wait_for(
+            proc.communicate(input=diff.encode()),
+            timeout=PATCH_TIMEOUT_SECONDS,
+        )
+    except asyncio.TimeoutError:
+        try:
+            proc.kill()
+        except ProcessLookupError:
+            pass
+        try:
+            stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=2.0)
+        except Exception:
+            stdout, stderr = b"", b""
+        combined = (
+            stdout.decode(errors="replace")
+            + stderr.decode(errors="replace")
+            + f"\npatch subprocess killed after {PATCH_TIMEOUT_SECONDS}s timeout"
+        ).strip()
+        return 124, combined
+
     combined = (stdout.decode(errors="replace") + stderr.decode(errors="replace")).strip()
     return proc.returncode or 0, combined
 

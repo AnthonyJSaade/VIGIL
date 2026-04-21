@@ -4,10 +4,13 @@
 > Updated after each significant change.
 
 ## Last Updated
-2026-04-16
+2026-04-20
 
 ## Current Phase
 **Phase 10 complete — MVP fully operational.** Demo repo created (`demo-repos/vibe-todo-app/`), semgrep installed, end-to-end smoke test passed (8 Semgrep findings detected). Docker setup added (backend Dockerfile, frontend Dockerfile, docker-compose.yml). All 10 phases of the build plan are complete.
+
+## Recent Fixes
+- **2026-04-20 — Sandbox verification hang.** `verify_patch` could hang forever when the Surgeon produced a malformed unified diff: `patch -p1` failed with "malformed patch at line N", then the `-p0` fallback prompted `File to patch:` on `/dev/tty` and blocked indefinitely because stdin had already been closed by `communicate()`. The hung subprocess kept the background task alive, so `VERIFICATION_COMPLETED` was never published, the UI polled `/verification` 404s forever, and orphaned `patch` processes + uncleaned `vigil-verify-*` temp dirs destabilized Docker Desktop's VM (surfacing as "unexpected EOF"). Fix in `backend/app/verification/sandbox.py:_run_patch`: pass `--batch` to `patch` so it exits non-zero on any ambiguity instead of prompting, plus a `PATCH_TIMEOUT_SECONDS = 30` safety-net `asyncio.wait_for` mirroring the existing pattern in `scanner/runner.py:run_semgrep`. Malformed diffs now fail fast (~20ms total) with a clean report surfaced in the UI.
 
 ## What Exists
 
