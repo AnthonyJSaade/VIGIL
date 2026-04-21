@@ -1,11 +1,16 @@
 """Surgeon agent — generates minimal security patches via Claude.
 
-Given a finding and the full source file, the Surgeon produces a unified diff
-that fixes the vulnerability with the smallest possible change.  Supports
-retry: when called with ``prior_concerns``, it adjusts the patch to address
-the Critic's objections.
+The Surgeon returns the **full patched file content** (not a diff). The
+backend computes a unified diff deterministically with ``difflib`` so the
+diff is guaranteed to be well-formed and to match the real source file
+context exactly — LLM-generated diffs are notorious for hallucinated
+context lines and broken hunk counts, which wrecked sandbox application.
+
+Supports retry: when called with ``prior_concerns``, the Surgeon adjusts
+the patched file to address the Critic's objections.
 """
 
+import difflib
 import json
 import logging
 import uuid
@@ -18,8 +23,6 @@ from ..models.patch import PatchProposal
 
 log = logging.getLogger(__name__)
 
-_MODEL = "claude-sonnet-4-20250514"
-
 _SYSTEM_PROMPT = """\
 You are the Surgeon — a senior security engineer who writes minimal, \
 targeted patches.
@@ -27,23 +30,28 @@ targeted patches.
 Rules:
 1. Fix ONLY the specific vulnerability described. Do not refactor, improve \
 style, or add features.
-2. Output a unified diff (--- a/path, +++ b/path, @@ hunk headers, - and + \
-lines). Nothing else outside the JSON.
-3. Keep the patch as small as possible — every changed line must be justified.
-4. Preserve existing functionality. The patch must not break tests or \
+2. Keep the change as small as possible — every changed line must be justified.
+3. Preserve existing functionality. The change must not break tests or \
 introduce regressions.
-5. Use secure coding patterns: parameterized queries, allow-lists, proper \
+4. Use secure coding patterns: parameterized queries, allow-lists, proper \
 escaping, env-based secrets, etc.
-6. Never suppress a scanner rule, remove authentication, or widen trust \
+5. Never suppress a scanner rule, remove authentication, or widen trust \
 boundaries as a "fix".
 
 Return ONLY a JSON object with exactly these fields:
 {
-  "diff": "<unified diff string>",
+  "patched_content": "<the FULL updated source file content, byte-for-byte, with your minimal edit applied>",
   "explanation": "<2-3 sentence explanation of what the patch does and why>"
 }
 
-Do NOT wrap the JSON in markdown code fences. Return raw JSON only.
+Requirements for ``patched_content``:
+- It must be the COMPLETE file, not a snippet or a diff.
+- Preserve every line you did not need to change exactly as-is, including \
+whitespace, indentation, trailing newline, and comments.
+- Do NOT include markdown code fences, escape sequences, or any wrapper — \
+just the raw source as a JSON string.
+
+Do NOT wrap the JSON response in markdown code fences. Return raw JSON only.
 """
 
 
@@ -75,7 +83,7 @@ def _build_user_prompt(
 
 
 def _parse_response(raw_text: str) -> tuple[str, str]:
-    """Extract diff and explanation from Claude's JSON response."""
+    """Extract patched_content and explanation from Claude's JSON response."""
     text = raw_text.strip()
     if text.startswith("```"):
         text = text.split("\n", 1)[1] if "\n" in text else text[3:]
@@ -84,7 +92,27 @@ def _parse_response(raw_text: str) -> tuple[str, str]:
         text = text.strip()
 
     data = json.loads(text)
-    return data["diff"], data["explanation"]
+    return data["patched_content"], data["explanation"]
+
+
+def _compute_diff(original: str, patched: str, file_path: str) -> str:
+    """Produce a well-formed unified diff from before/after file contents.
+
+    Uses the standard ``a/<path> b/<path>`` header convention so the sandbox
+    verifier's ``-p1`` path resolution works by default. ``splitlines
+    (keepends=True)`` preserves each line's original newline, which keeps
+    ``difflib``'s output byte-accurate for binary-clean text files.
+    """
+    old_lines = original.splitlines(keepends=True)
+    new_lines = patched.splitlines(keepends=True)
+    diff_lines = difflib.unified_diff(
+        old_lines,
+        new_lines,
+        fromfile=f"a/{file_path}",
+        tofile=f"b/{file_path}",
+        n=3,
+    )
+    return "".join(diff_lines)
 
 
 async def propose_patch(
@@ -95,6 +123,9 @@ async def propose_patch(
 ) -> PatchProposal:
     """Call Claude to generate a minimal patch for the given finding.
 
+    The Surgeon returns the full patched file; we compute the unified diff
+    locally so it is always well-formed and matches real context exactly.
+
     Args:
         finding: The vulnerability to fix.
         file_content: Full content of the affected source file.
@@ -102,7 +133,7 @@ async def propose_patch(
         attempt: Attempt number (1 = first try, 2 = retry after rejection).
 
     Returns:
-        A :class:`PatchProposal` with the unified diff and explanation.
+        A :class:`PatchProposal` with the computed unified diff and explanation.
 
     Raises:
         ValueError: If the API key is missing or Claude returns unparseable output.
@@ -114,25 +145,34 @@ async def propose_patch(
 
     client = anthropic.AsyncAnthropic(api_key=settings.anthropic_api_key)
     response = await client.messages.create(
-        model=_MODEL,
-        max_tokens=4096,
+        model=settings.surgeon_model,
+        max_tokens=8192,
         system=_SYSTEM_PROMPT,
         messages=[{"role": "user", "content": user_prompt}],
     )
     raw_text = response.content[0].text
 
     try:
-        diff, explanation = _parse_response(raw_text)
+        patched_content, explanation = _parse_response(raw_text)
     except (json.JSONDecodeError, KeyError) as exc:
         log.error("Surgeon returned unparseable response: %s", exc)
         raise ValueError(f"Surgeon output could not be parsed: {exc}") from exc
+
+    if patched_content == file_content:
+        log.warning(
+            "Surgeon returned unchanged content for finding %s (attempt %d)",
+            finding.id,
+            attempt,
+        )
+
+    diff = _compute_diff(file_content, patched_content, finding.file_path)
 
     return PatchProposal(
         id=str(uuid.uuid4()),
         finding_id=finding.id,
         diff=diff,
         explanation=explanation,
-        model_used=_MODEL,
+        model_used=settings.surgeon_model,
         attempt=attempt,
         prior_concerns=prior_concerns,
     )

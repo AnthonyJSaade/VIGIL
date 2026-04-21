@@ -18,8 +18,6 @@ from ..models.patch import PatchProposal
 
 log = logging.getLogger(__name__)
 
-_MODEL = "claude-sonnet-4-20250514"
-
 _SYSTEM_PROMPT = """\
 You are the Critic — an independent security reviewer. Your job is to \
 evaluate whether a proposed patch actually fixes the vulnerability without \
@@ -108,7 +106,7 @@ async def review_patch(
 
     client = anthropic.AsyncAnthropic(api_key=settings.anthropic_api_key)
     response = await client.messages.create(
-        model=_MODEL,
+        model=settings.critic_model,
         max_tokens=2048,
         system=_SYSTEM_PROMPT,
         messages=[{"role": "user", "content": user_prompt}],
@@ -127,5 +125,5 @@ async def review_patch(
         approved=approved,
         reasoning=reasoning,
         concerns=concerns,
-        model_used=_MODEL,
+        model_used=settings.critic_model,
     )

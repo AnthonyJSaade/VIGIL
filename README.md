@@ -168,6 +168,8 @@ source .venv/bin/activate
 pip install -r requirements.txt
 
 export VIGIL_ANTHROPIC_API_KEY="sk-ant-..."
+export VIGIL_SURGEON_MODEL="claude-sonnet-4-6"
+export VIGIL_CRITIC_MODEL="claude-sonnet-4-6"
 
 uvicorn app.main:app --reload --port 8000
 ```
@@ -198,6 +200,8 @@ All backend settings use the `VIGIL_` prefix:
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `VIGIL_ANTHROPIC_API_KEY` | `""` | Anthropic API key for Claude (required for LLM features) |
+| `VIGIL_SURGEON_MODEL` | `claude-sonnet-4-6` | Model ID used by the Surgeon when generating patches |
+| `VIGIL_CRITIC_MODEL` | `claude-sonnet-4-6` | Model ID used by the Critic when reviewing patches |
 | `VIGIL_DB_PATH` | `vigil.db` | Path to the SQLite database file |
 | `VIGIL_DEMO_REPOS_PATH` | `../demo-repos` | Path to the directory containing curated demo repositories |
 

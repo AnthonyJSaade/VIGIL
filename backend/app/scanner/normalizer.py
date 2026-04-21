@@ -43,13 +43,29 @@ def normalize_findings(
 
     for match in raw.get("results", []):
         extra = match.get("extra", {})
-        file_path = match.get("path", "")
+        raw_path = match.get("path", "")
         start_line = match.get("start", {}).get("line", 0)
         end_line = match.get("end", {}).get("line", 0)
 
         real_snippet = ""
         if repo_path is not None:
-            real_snippet = read_source_lines(repo_path, file_path, start_line, end_line)
+            real_snippet = read_source_lines(repo_path, raw_path, start_line, end_line)
+
+        # Semgrep emits absolute paths when invoked with an absolute repo root
+        # (e.g. ``/demo-repos/vibe-todo-app/server.js``). Always normalize to a
+        # repo-relative path so downstream consumers — the Surgeon's diff
+        # headers, the sandbox `patch` strip logic, the UI, and the HTML/ZIP
+        # exporters — can trust ``finding.file_path`` as-is. Falls back to a
+        # best-effort lstrip if the match isn't under the repo root (which
+        # shouldn't happen in practice, but keeps normalization safe).
+        file_path = raw_path
+        if repo_path is not None and raw_path:
+            try:
+                file_path = str(Path(raw_path).resolve().relative_to(repo_path.resolve()))
+            except ValueError:
+                file_path = raw_path.lstrip("/")
+        else:
+            file_path = raw_path.lstrip("/")
 
         snippet = real_snippet or extra.get("lines", "")
 

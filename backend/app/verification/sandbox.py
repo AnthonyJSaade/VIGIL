@@ -8,6 +8,7 @@ patched file.
 
 import asyncio
 import logging
+import re
 import shutil
 import tempfile
 import uuid
@@ -81,12 +82,14 @@ async def apply_patch_in_temp(
             "Could not identify any target files in the patch diff.",
         )
 
+    normalized = _normalize_diff(patch_diff)
+
     sandbox_dir = Path(tempfile.mkdtemp(prefix="vigil-apply-"))
     sandbox_repo = sandbox_dir / "repo"
 
     try:
         shutil.copytree(repo_path, sandbox_repo)
-        applied, diagnostics = await _apply_diff(sandbox_repo, patch_diff)
+        applied, diagnostics = await _apply_diff(sandbox_repo, normalized)
         if not applied:
             raise PatchApplyError(
                 "Patch failed to apply cleanly to the sandbox copy.",
@@ -153,29 +156,164 @@ async def _run_patch(sandbox_path: Path, diff: str, strip: int) -> tuple[int, st
     return proc.returncode or 0, combined
 
 
+_HUNK_HEADER_RE = re.compile(r"^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@(.*)$")
+_FILE_HEADER_RE = re.compile(r"^(---|\+\+\+|diff |index )")
+
+
+def _normalize_diff(diff: str) -> str:
+    """Fix common LLM-introduced unified-diff malformations.
+
+    LLMs frequently produce two kinds of broken hunks: (1) a context line
+    missing the leading space (e.g. ``res.status(500)...`` instead of
+    ``  res.status(500)...``), which makes ``patch`` bail with "malformed
+    patch at line N"; (2) ``@@ -a,b +c,d @@`` counts that don't match the
+    actual body. We repair both: bare lines inside a hunk are promoted to
+    context lines, and each hunk header is rewritten with the true counts.
+    Blank lines in the body are treated as empty context (``" "`` prefix).
+    """
+    lines = diff.splitlines(keepends=True)
+    out: list[str] = []
+    hunk_header_idx: int | None = None
+    old_start = new_start = 1
+    old_count = new_count = 0
+    trailing = ""
+
+    def flush_header() -> None:
+        if hunk_header_idx is None:
+            return
+        out[hunk_header_idx] = (
+            f"@@ -{old_start},{old_count} +{new_start},{new_count} @@{trailing}\n"
+        )
+
+    for raw in lines:
+        line = raw if raw.endswith("\n") else raw + "\n"
+
+        if _FILE_HEADER_RE.match(line):
+            flush_header()
+            hunk_header_idx = None
+            out.append(line)
+            continue
+
+        m = _HUNK_HEADER_RE.match(line.rstrip("\n"))
+        if m:
+            flush_header()
+            old_start = int(m.group(1))
+            new_start = int(m.group(3))
+            old_count = 0
+            new_count = 0
+            trailing = m.group(5) or ""
+            out.append(line)
+            hunk_header_idx = len(out) - 1
+            continue
+
+        if hunk_header_idx is None:
+            out.append(line)
+            continue
+
+        body = line.rstrip("\n")
+        if body == "":
+            out.append(" \n")
+            old_count += 1
+            new_count += 1
+            continue
+
+        prefix = body[0]
+        if prefix == " ":
+            out.append(line)
+            old_count += 1
+            new_count += 1
+        elif prefix == "+":
+            out.append(line)
+            new_count += 1
+        elif prefix == "-":
+            out.append(line)
+            old_count += 1
+        elif prefix == "\\":
+            out.append(line)
+        else:
+            out.append(" " + line)
+            old_count += 1
+            new_count += 1
+
+    flush_header()
+    return "".join(out)
+
+
+def _detect_strip_level(sandbox_path: Path, diff: str) -> int | None:
+    """Pick the smallest strip level where every target file resolves in the sandbox.
+
+    The sandbox is always a copy of the repo root, but the Surgeon may prefix
+    diff paths in several ways (``a/server.js``, ``a/demo-repos/<repo>/server.js``,
+    or even an absolute-ish prefix). We walk each ``+++ b/...`` header and find
+    the smallest ``N`` such that stripping ``N`` leading components yields a file
+    that actually exists in the sandbox for every non-creation target.
+    """
+    targets: list[str] = []
+    for line in diff.splitlines():
+        if not line.startswith("+++ "):
+            continue
+        raw = line[4:].strip().split("\t", 1)[0].strip()
+        if not raw or raw == "/dev/null":
+            continue
+        targets.append(raw.lstrip("/"))
+
+    if not targets:
+        return None
+
+    max_depth = max(t.count("/") for t in targets)
+    for strip in range(0, max_depth + 1):
+        resolved = True
+        for t in targets:
+            parts = t.split("/")
+            if strip >= len(parts):
+                resolved = False
+                break
+            sub = "/".join(parts[strip:])
+            if not (sandbox_path / sub).is_file():
+                resolved = False
+                break
+        if resolved:
+            return strip
+    return None
+
+
 async def _apply_diff(sandbox_path: Path, diff: str) -> tuple[bool, str]:
     """Apply a unified diff inside the sandbox using ``patch`` with fuzz.
 
-    Tries ``-p1`` first (standard ``a/path`` ``b/path`` layout) and falls back
-    to ``-p0`` when the LLM omitted the ``a/ b/`` prefix. Returns
-    ``(applied, diagnostics)`` — ``diagnostics`` is empty on success and
-    contains the combined stdout/stderr on failure so it can be shown in the
-    verification report.
+    Auto-detects the correct ``-pN`` strip level by checking which prefix of
+    the diff's target paths actually resolves to a file in the sandbox. Falls
+    back to trying common strip levels in order so minor LLM path quirks
+    (missing ``a/ b/`` prefix, extra ``demo-repos/<repo>/`` prefix) still apply.
+    Returns ``(applied, diagnostics)`` — ``diagnostics`` is empty on success and
+    contains the combined stdout/stderr on failure.
     """
-    rc, out = await _run_patch(sandbox_path, diff, strip=1)
-    if rc == 0:
-        log.info("Patch applied cleanly with -p1: %s", out)
-        return True, ""
+    attempts: list[tuple[int, str]] = []
+    tried: set[int] = set()
 
-    log.warning("patch -p1 failed (exit %d): %s", rc, out)
+    detected = _detect_strip_level(sandbox_path, diff)
+    if detected is not None:
+        rc, out = await _run_patch(sandbox_path, diff, strip=detected)
+        tried.add(detected)
+        if rc == 0:
+            log.info("Patch applied cleanly with -p%d (auto-detected): %s", detected, out)
+            return True, ""
+        attempts.append((detected, out))
+        log.warning("patch -p%d (auto-detected) failed (exit %d): %s", detected, rc, out)
 
-    rc0, out0 = await _run_patch(sandbox_path, diff, strip=0)
-    if rc0 == 0:
-        log.info("Patch applied cleanly with -p0 fallback: %s", out0)
-        return True, ""
+    for strip in (1, 0, 2, 3, 4):
+        if strip in tried:
+            continue
+        rc, out = await _run_patch(sandbox_path, diff, strip=strip)
+        tried.add(strip)
+        if rc == 0:
+            log.info("Patch applied cleanly with -p%d fallback: %s", strip, out)
+            return True, ""
+        attempts.append((strip, out))
+        log.warning("patch -p%d fallback failed (exit %d): %s", strip, rc, out)
 
-    log.warning("patch -p0 fallback also failed (exit %d): %s", rc0, out0)
-    combined = f"-p1 attempt:\n{out}\n\n-p0 attempt:\n{out0}".strip()
+    combined = "\n\n".join(
+        f"-p{strip} attempt:\n{out}" for strip, out in attempts
+    ).strip()
     return False, combined
 
 
@@ -216,7 +354,8 @@ async def verify_patch(
         shutil.copytree(repo_path, sandbox_repo)
         log.info("Sandbox created at %s", sandbox_repo)
 
-        patch_applied, patch_stderr = await _apply_diff(sandbox_repo, patch.diff)
+        normalized = _normalize_diff(patch.diff)
+        patch_applied, patch_stderr = await _apply_diff(sandbox_repo, normalized)
         if not patch_applied:
             details = "Patch failed to apply cleanly to the sandbox copy."
             if patch_stderr:
@@ -231,7 +370,7 @@ async def verify_patch(
 
         try:
             raw = await run_semgrep(sandbox_repo)
-            post_findings = normalize_findings(raw, "verification")
+            post_findings = normalize_findings(raw, "verification", sandbox_repo)
         except ScanError as exc:
             return VerificationReport(
                 id=str(uuid.uuid4()),

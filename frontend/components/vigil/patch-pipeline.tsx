@@ -50,11 +50,22 @@ export function PatchPipeline({ findingId }: PatchPipelineProps) {
   const [attempts, setAttempts] = useState<PatchWithVerdict[]>([])
   const [verification, setVerification] = useState<VerificationReport | null>(null)
   const [errorMsg, setErrorMsg] = useState<string | null>(null)
+  const [lastAction, setLastAction] = useState<"patch" | "verify" | null>(null)
   const [applyOpen, setApplyOpen] = useState(false)
   const [applying, setApplying] = useState(false)
   const [applyResult, setApplyResult] = useState<ApplyPatchResult | null>(null)
   const [applyError, setApplyError] = useState<string | null>(null)
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
+
+  const findLatestApproved = useCallback(
+    (list: PatchWithVerdict[]) => {
+      for (let i = list.length - 1; i >= 0; i--) {
+        if (list[i].verdict?.approved) return list[i]
+      }
+      return undefined
+    },
+    [],
+  )
 
   const clearPoll = useCallback(() => {
     if (pollRef.current) {
@@ -72,7 +83,7 @@ export function PatchPipeline({ findingId }: PatchPipelineProps) {
         if (data.length === 0) return
         setAttempts(data)
         const last = data[data.length - 1]
-        const approved = data.find((d) => d.verdict?.approved)
+        const approved = findLatestApproved(data)
 
         if (approved) {
           const report = await fetchVerification(approved.patch.id).catch(() => null)
@@ -87,7 +98,7 @@ export function PatchPipeline({ findingId }: PatchPipelineProps) {
         }
       })
       .catch(() => {})
-  }, [findingId])
+  }, [findingId, findLatestApproved])
 
   const pollPatches = useCallback(
     (knownAttemptIds: Set<string>) => {
@@ -132,6 +143,7 @@ export function PatchPipeline({ findingId }: PatchPipelineProps) {
       const force = !!opts?.force
       const knownAttemptIds = new Set(attempts.map((a) => a.patch.id))
 
+      setLastAction("patch")
       setStage("patching")
       setErrorMsg(null)
       if (force) {
@@ -153,10 +165,11 @@ export function PatchPipeline({ findingId }: PatchPipelineProps) {
 
   const startVerify = useCallback(
     async (opts?: { force?: boolean }) => {
-      const approved = attempts.find((a) => a.verdict?.approved)
+      const approved = findLatestApproved(attempts)
       if (!approved) return
 
       const force = !!opts?.force
+      setLastAction("verify")
       setStage("verifying")
       setErrorMsg(null)
       if (force) {
@@ -165,8 +178,13 @@ export function PatchPipeline({ findingId }: PatchPipelineProps) {
 
       try {
         await requestVerify(approved.patch.id, { force })
-      } catch {
-        setErrorMsg("Failed to start verification.")
+      } catch (err) {
+        const detail = err instanceof Error ? err.message : ""
+        setErrorMsg(
+          detail
+            ? `Failed to start verification: ${detail}`
+            : "Failed to start verification.",
+        )
         setStage("error")
         return
       }
@@ -185,10 +203,10 @@ export function PatchPipeline({ findingId }: PatchPipelineProps) {
         }
       }, 2000)
     },
-    [attempts, clearPoll],
+    [attempts, clearPoll, findLatestApproved],
   )
 
-  const latestApproved = attempts.find((a) => a.verdict?.approved)
+  const latestApproved = findLatestApproved(attempts)
   const latestRejected = attempts.filter((a) => a.verdict && !a.verdict.approved)
   const hasApproval = !!latestApproved
   const verifiedClean = !!verification?.scannerRerunClean
@@ -487,9 +505,13 @@ export function PatchPipeline({ findingId }: PatchPipelineProps) {
       {/* Error */}
       {stage === "error" && (
         <div className="rounded-lg border border-destructive/50 bg-destructive/10 p-6 text-center">
-          <p className="text-sm text-destructive font-medium">{errorMsg}</p>
+          <p className="text-sm text-destructive font-medium whitespace-pre-wrap">{errorMsg}</p>
           <Button
-            onClick={() => startPatch({ force: attempts.length > 0 })}
+            onClick={() =>
+              lastAction === "verify"
+                ? startVerify({ force: true })
+                : startPatch({ force: attempts.length > 0 })
+            }
             variant="outline"
             size="sm"
             className="mt-3 gap-2"
