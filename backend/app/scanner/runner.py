@@ -3,11 +3,12 @@
 import asyncio
 import json
 import logging
+import os
 from pathlib import Path
 
 log = logging.getLogger(__name__)
 
-SEMGREP_TIMEOUT_SECONDS = 120
+SEMGREP_TIMEOUT_SECONDS = int(os.environ.get("VIGIL_SEMGREP_TIMEOUT_SECONDS", "120"))
 
 
 class ScanError(Exception):

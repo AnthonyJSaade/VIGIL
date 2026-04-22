@@ -262,6 +262,35 @@ The export endpoint generates a self-contained HTML report with:
 
 The ZIP bundle includes the HTML report plus raw JSON files (findings, trace events) and individual diff files for each patch.
 
+## Evaluation
+
+Vigil ships with a single-command evaluation harness that runs the full Hunter → Surgeon → Critic → Verifier pipeline against every curated demo repo, matches reported findings against ground-truth manifests (`demo-repos/<repo>/.vigil/truth.yaml`), and emits a Markdown report plus machine-readable JSON summary.
+
+```bash
+python scripts/eval.py                          # full eval on all curated repos
+python scripts/eval.py --repos vibe-notes-api   # single repo
+python scripts/eval.py --hunter-only            # skip patch/critic/verify, Hunter metrics only
+python scripts/eval.py --skip-llm-review        # Semgrep-only Hunter (no Anthropic calls)
+python scripts/eval.py --out eval-artifacts/custom/
+```
+
+Artifacts land in `eval-artifacts/<timestamp>/`:
+
+- `EVAL.md` — human-readable report with per-repo and aggregate tables
+- `summary.json` — flat machine-readable metrics
+- `raw/<repo>.json` — every finding, match decision, patch, verdict, and verification for audit
+- `eval.db` — the throwaway SQLite created for the run
+
+The repo-root [`EVAL.md`](EVAL.md) is the latest committed snapshot. Metrics reported:
+
+- **Hunter**: per-scanner precision / recall / F1 (Semgrep alone, LLM reviewer alone, hybrid union), plus an "LLM-only contribution" count — planted findings caught only by the LLM pass.
+- **Surgeon**: patch apply rate, mean attempts, retry rate.
+- **Critic**: approval rate, agreement with Verifier (approved AND clean), false-accept rate (approved BUT dirty).
+- **End-to-end**: fix funnel from truth → detected → patched → approved → verified clean.
+- **Timing**: scan wall-clock, p50/p95 per patch loop and verification.
+
+Truth manifest schema is documented at [`demo-repos/TRUTH_SCHEMA.md`](demo-repos/TRUTH_SCHEMA.md).
+
 ## License
 
 This project was built as a university demo. Not intended for production security assessments.
