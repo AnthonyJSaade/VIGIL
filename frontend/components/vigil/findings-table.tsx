@@ -1,3 +1,4 @@
+// Table of findings for a run. Click a row to open the detail page.
 "use client"
 
 import { useRouter } from "next/navigation"

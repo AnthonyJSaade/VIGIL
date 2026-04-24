@@ -35,3 +35,16 @@ out/
 # SQLite
 *.sqlite
 *.sqlite3
+
+# Local-only documentation (not for public repo)
+AGENTS.md
+PLAN.md
+CONTEXT.md
+PRESENTATION_NOTES.md
+FINAL_VIGIL-2.pdf
+*.pdf
+paper/
+frontend/AGENTS.md
+frontend/CLAUDE.md
+frontend/README.md
+.cursor/

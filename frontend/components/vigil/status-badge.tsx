@@ -1,3 +1,4 @@
+// Colored pill showing where a run or patch currently stands.
 import { cn } from "@/lib/utils"
 
 export type AuditStatus = "scanning" | "patching" | "reviewing" | "complete" | "failed"

@@ -1,3 +1,4 @@
+// Batch view: runs every finding in a run through the patch + verify pipeline in sequence.
 "use client"
 
 import { use, useState, useEffect, useRef, useCallback } from "react"

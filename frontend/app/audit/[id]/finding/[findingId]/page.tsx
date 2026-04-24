@@ -1,3 +1,4 @@
+// Finding detail page: shows the vulnerability and drives the Surgeon/Critic/Verifier pipeline.
 "use client"
 
 import { use, useState, useEffect } from "react"

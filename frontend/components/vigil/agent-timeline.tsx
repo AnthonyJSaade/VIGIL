@@ -1,3 +1,4 @@
+// Horizontal strip of agent cards showing where the pipeline is currently at.
 "use client"
 
 import { cn } from "@/lib/utils"

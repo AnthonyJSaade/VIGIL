@@ -1,3 +1,4 @@
+// Small tile for a single agent (Hunter, Surgeon, Critic, Verifier) with its current status.
 "use client"
 
 import { cn } from "@/lib/utils"

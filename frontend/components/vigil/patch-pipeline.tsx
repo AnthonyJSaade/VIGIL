@@ -1,3 +1,4 @@
+// Surgeon -> Critic -> Verifier pipeline UI for a single finding, with retry handling.
 "use client"
 
 import { useState, useCallback, useEffect, useRef } from "react"

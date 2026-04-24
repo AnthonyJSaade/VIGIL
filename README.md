@@ -129,10 +129,7 @@ All agent steps stream to the browser via Server-Sent Events (SSE) so the entire
 │   └── vibe-todo-app/           # Intentionally vulnerable Express.js app
 │       └── server.js            # 9 vulns (5 Semgrep + 4 LLM-only)
 ├── docker-compose.yml
-├── .env.example
-├── AGENTS.md                    # Project charter + agent rules
-├── PLAN.md                      # Full implementation plan
-└── CONTEXT.md                   # Build context for session continuity
+└── .env.example
 ```
 
 ## Getting Started

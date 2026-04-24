@@ -1,3 +1,4 @@
+// Thin bar visualizing a finding's confidence score (0.0 to 1.0).
 import { cn } from "@/lib/utils"
 
 interface ConfidenceBarProps {

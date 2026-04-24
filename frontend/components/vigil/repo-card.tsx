@@ -1,3 +1,4 @@
+// Tile for a single demo repo on the landing page.
 "use client"
 
 import { cn } from "@/lib/utils"

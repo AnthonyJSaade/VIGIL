@@ -1,3 +1,4 @@
+// Compact summary tile (icon + number + label) used in the dashboard header.
 import { cn } from "@/lib/utils"
 import type { LucideIcon } from "lucide-react"
 

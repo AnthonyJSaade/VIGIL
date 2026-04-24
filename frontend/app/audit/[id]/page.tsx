@@ -1,3 +1,4 @@
+// Audit dashboard: live SSE timeline of agent events plus the findings list for one run.
 "use client"
 
 import { use, useState, useEffect, useCallback, useRef } from "react"

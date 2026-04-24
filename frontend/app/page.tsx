@@ -1,3 +1,4 @@
+// Landing page: pick a curated demo repo (or point at a local path) and kick off a run.
 "use client"
 
 import { useState, useEffect } from "react"

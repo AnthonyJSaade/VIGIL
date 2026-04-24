@@ -1,3 +1,4 @@
+// Colored badge for a finding's severity (error, warning, info).
 import { cn } from "@/lib/utils"
 import { AlertCircle, AlertTriangle, Info } from "lucide-react"
 

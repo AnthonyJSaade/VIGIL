@@ -1,3 +1,4 @@
+// Syntax-highlighted code and diff viewer used across the app.
 "use client"
 
 import { cn } from "@/lib/utils"
