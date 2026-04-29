@@ -1,6 +1,5 @@
 # Vigil Evaluation Report
 
-*Generated 2026-04-22T06:06:09+00:00Z*
 
 Across 4 curated vibe-coded repos (516 LOC, 38 planted vulnerabilities), Vigil's hybrid Hunter detected 36/38 (94.7% recall, 90.0% precision) and the Surgeon-Critic-Verifier pipeline produced a verified-clean fix for 18 of them (47.4% end-to-end fix rate). 22 findings were caught only by the LLM reviewer, not by Semgrep.
 
